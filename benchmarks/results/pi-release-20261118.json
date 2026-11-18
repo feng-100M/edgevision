@@ -1,0 +1,81 @@
+{
+  "board": "Raspberry Pi 5 4GB",
+  "date": "2026-11-18",
+  "camera_request": {
+    "resolution": [
+      640,
+      480
+    ],
+    "fps": 20,
+    "mqtt_enabled": false
+  },
+  "camera_measured": {
+    "duration_seconds": 60.011608943,
+    "capture_frames": 1157,
+    "processed_frames": 1157,
+    "capture_fps": 19.279603069781672,
+    "inference_fps": 19.279603069781672,
+    "queue_dropped_frames": 0,
+    "camera_ipc_skipped_frames": 0,
+    "app_queue_wait_p95_ms": 0,
+    "errors": 0,
+    "storage_failed": 0,
+    "camera_reconnects": 0,
+    "end_to_end_p95_ms": 43,
+    "inference_p95_ms": 37,
+    "throttled": "0x0",
+    "preview_enabled": false,
+    "model": "yolox_nano_320.onnx",
+    "model_sha256": "1743ea864cb8321abab1e5d4e8c1a1d26dff881af3759d4803b1a0791b7a9da2",
+    "ort_threads": 2,
+    "roi_enabled": false
+  },
+  "postprocess_only": {
+    "system": "Linux",
+    "python": "3.11.2",
+    "numpy": "1.26.4",
+    "opencv": "4.11.0",
+    "models": {
+      "320": {
+        "frames": 20,
+        "boxes_identical": 129,
+        "samples_per_version": 240,
+        "before": {
+          "median_ms": 0.7031,
+          "p95_ms": 0.7595
+        },
+        "after": {
+          "median_ms": 0.2216,
+          "p95_ms": 0.2478
+        }
+      },
+      "352": {
+        "frames": 20,
+        "boxes_identical": 126,
+        "samples_per_version": 240,
+        "before": {
+          "median_ms": 0.9599,
+          "p95_ms": 1.0422
+        },
+        "after": {
+          "median_ms": 0.2519,
+          "p95_ms": 0.2853
+        }
+      },
+      "416": {
+        "frames": 20,
+        "boxes_identical": 136,
+        "samples_per_version": 240,
+        "before": {
+          "median_ms": 1.3247,
+          "p95_ms": 1.6512
+        },
+        "after": {
+          "median_ms": 0.3074,
+          "p95_ms": 0.3462
+        }
+      }
+    }
+  },
+  "method": "OpenCV vtest.avi, frames 0,10,...,190. Each size used the same raw ONNX tensor for both implementations. Compared all decoded detections including score and order; alternated timing order over 12 repetitions. Timings exclude inference, capture and event output."
+}

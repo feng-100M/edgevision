@@ -1,0 +1,25 @@
+# Reference user unit, stored in the project only.
+# Use scripts/start_service.sh to run without installing outside this directory.
+
+# 服务元数据；systemd 用它在用户会话中识别这条 UVC 检测服务。
+[Unit]
+Description=EdgeVision UVC intrusion detection
+
+# 进程在前台运行，工作目录和命令都指向项目自己的虚拟环境与配置。
+[Service]
+Type=simple
+WorkingDirectory=%h/edgevision
+ExecStart=%h/edgevision/.venv/bin/edgevision run --config %h/edgevision/config.local.yaml --input uvc
+
+# 摄像头或进程异常退出时由 systemd 自动重启，并等待几秒避免快速重启循环。
+Restart=on-failure
+RestartSec=3
+
+# 限制服务权限和资源上限，避免故障注入影响用户会话中的其他进程。
+NoNewPrivileges=true
+MemoryMax=2G
+TasksMax=96
+
+# 保证日志即时输出，并把临时文件限制在项目目录内。
+Environment=PYTHONUNBUFFERED=1
+Environment=TMPDIR=%h/edgevision/.tmp

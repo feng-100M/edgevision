@@ -1,0 +1,79 @@
+{
+  "name": "YOLOX-Nano",
+  "release": "0.1.1rc0",
+  "source": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx",
+  "upstream_project": "https://github.com/Megvii-BaseDetection/YOLOX",
+  "upstream_license": "Apache-2.0",
+  "license_source": "https://github.com/Megvii-BaseDetection/YOLOX/blob/main/LICENSE",
+  "sha256": "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d",
+  "file_size_bytes": 3659407,
+  "input": {
+    "name": "images",
+    "shape": [
+      1,
+      3,
+      416,
+      416
+    ],
+    "dtype": "float32",
+    "color": "BGR",
+    "scale": "0..255",
+    "letterbox": {
+      "placement": "top-left",
+      "padding": 114
+    }
+  },
+  "output": {
+    "name": "output",
+    "shape": [
+      1,
+      3549,
+      85
+    ],
+    "format": "raw YOLOX grid/log-width/log-height, objectness, 80 COCO class probabilities"
+  },
+  "person_class_id": 0,
+  "pretraining_dataset": "COCO",
+  "inference_backend": "onnxruntime==1.20.1",
+  "selection_reason": "official ready-to-run nano ONNX; avoids installation/export of training stack; fixed 416 input",
+  "variants": {
+    "models/yolox_nano_320.onnx": {
+      "sha256": "1743ea864cb8321abab1e5d4e8c1a1d26dff881af3759d4803b1a0791b7a9da2",
+      "base_sha256": "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d",
+      "input_shape": [
+        1,
+        3,
+        320,
+        320
+      ],
+      "output_shape": [
+        1,
+        2100,
+        85
+      ],
+      "weights_unchanged": true,
+      "transformation": "fixed spatial dimensions and inferred shape metadata; no retraining or quantization",
+      "generator": "scripts/build_fast_model.py",
+      "onnx_version": "1.17.0"
+    },
+    "models/yolox_nano_352.onnx": {
+      "sha256": "6324e9d31f503b238e4957334bdca7d7ad44e0cc6ae86f2dea47d4b3ea7746a3",
+      "base_sha256": "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d",
+      "input_shape": [
+        1,
+        3,
+        352,
+        352
+      ],
+      "output_shape": [
+        1,
+        2541,
+        85
+      ],
+      "weights_unchanged": true,
+      "transformation": "fixed spatial dimensions and inferred shape metadata; no retraining or quantization",
+      "generator": "scripts/build_fast_model.py",
+      "onnx_version": "1.17.0"
+    }
+  }
+}

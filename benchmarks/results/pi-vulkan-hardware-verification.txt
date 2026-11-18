@@ -1,0 +1,20 @@
+Raspberry Pi 5 V3D hardware dispatch verification
+Linux 6.6.51+rpt-rpi-2712 aarch64 GNU/Linux
+
+Separate strace runs. All runs completed with exit 0, one warmup and one round.
+Strace was disabled for the timed comparison in pi-vulkan-cpu-comparison.json.
+
+ncnn-cpu-2
+Successful hardware compute submissions: 0
+
+ncnn-vulkan-1
+2469  ioctl(3</dev/dri/renderD128<char 226:128>>, DRM_IOCTL_V3D_SUBMIT_CSD, 0xf08ced0) = 0
+Successful hardware compute submissions: 654
+
+ncnn-vulkan-2
+2489  ioctl(3</dev/dri/renderD128<char 226:128>>, DRM_IOCTL_V3D_SUBMIT_CSD, 0x3cd893f0) = 0
+Successful hardware compute submissions: 981
+
+	deviceType         = PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	deviceName         = V3D 7.1.7
+	driverInfo         = Mesa 23.2.1-1~bpo12+rpt3

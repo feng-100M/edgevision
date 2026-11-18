@@ -1,0 +1,68 @@
+{
+  "duration_seconds": 9.968137947999821,
+  "capture_frames": 100,
+  "processed_frames": 98,
+  "capture_fps": 10.03196389553033,
+  "inference_fps": 9.831324617619723,
+  "end_to_end_processing_fps": 9.831324617619723,
+  "model_compute_fps": 16.165284286226377,
+  "inference_fps_definition": "completed inferences per processing wall time; source pacing included",
+  "errors": 0,
+  "events": 12,
+  "inference_p50_ms": 62,
+  "inference_p95_ms": 63,
+  "end_to_end_p95_ms": 154,
+  "event_end_to_end_p95_ms": 299,
+  "max_software_frame_age_ms": 298.742367000159,
+  "max_media_lag_ms": 298.85068199982936,
+  "peak_rss_bytes": 116015104,
+  "peak_process_cpu_percent": 146.6,
+  "temperature_c": 61.7,
+  "peak_temperature_c": 65.0,
+  "throttled": "0x0",
+  "swap_in_bytes": 0,
+  "swap_out_bytes": 0,
+  "histogram_resolution_ms": 1,
+  "histogram_limit_ms": 60000,
+  "latency_clipped_samples": 0,
+  "frame_age_definition": "software_read_completion_to_processing_end; sensor/USB buffering excluded",
+  "mode": "latest",
+  "queue_dropped_frames": 2,
+  "queue_drop_rate": 0.02,
+  "max_queue_size": 1,
+  "max_queue_wait_ms": 99.17338500054029,
+  "camera_reconnects": 0,
+  "camera_driver_dropped_frames": 0,
+  "storage_failed": 0,
+  "mqtt_published": 12,
+  "mqtt_failed": 0,
+  "model": "yolox_nano.onnx",
+  "model_sha256": "c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd18a0b7d",
+  "model_input": [
+    416,
+    416
+  ],
+  "ort_threads": 2,
+  "confidence": 0.35,
+  "nms": 0.45,
+  "realtime": true,
+  "source": "video",
+  "roi": [
+    [
+      0.4,
+      0.1
+    ],
+    [
+      0.95,
+      0.1
+    ],
+    [
+      0.95,
+      0.95
+    ],
+    [
+      0.4,
+      0.95
+    ]
+  ]
+}

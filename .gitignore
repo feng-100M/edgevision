@@ -1,0 +1,53 @@
+# Device settings, local credentials and developer environments
+config.local*.yaml
+*.local.yml
+.env
+.env.*
+.local/
+.ssh/
+*.pem
+*.key
+.venv/
+.wheelhouse/
+.cache/
+.tmp/
+.pytest*/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.coverage*
+htmlcov/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Camera media, event history and binary model artifacts
+/output/
+/data/*
+!/data/README.md
+*.onnx
+*.pt
+*.pth
+*.avi
+*.mp4
+*.jpeg
+*.jpg
+*.png
+*.jsonl
+*.log
+*.part
+*.tar
+*.zip
+
+# Private run logs may contain camera IDs, machine names and local paths.
+# Only reviewed reference measurements are published.
+/benchmarks/results/*
+!/benchmarks/results/pi-realtime-latest.json
+!/benchmarks/results/optimized-camera.json
+!/benchmarks/results/optimized-tunnel.json
+!/benchmarks/results/pi-vulkan-cpu-comparison.json
+!/benchmarks/results/pi-vulkan-hardware-verification.txt
+!/benchmarks/results/pi-release-20261118.json

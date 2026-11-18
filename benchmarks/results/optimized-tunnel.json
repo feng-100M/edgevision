@@ -1,0 +1,10 @@
+{
+  "transport": "real Pi-to-Windows SSH tunnel",
+  "sample_seconds": 10.031000000000859,
+  "frames_received": 214,
+  "observed_stream_fps": 21.333865018441003,
+  "kib_per_second": 389.0208907075233,
+  "server_preview_fps": 22.53647334571969,
+  "server_processing_fps": 21.213089314608848,
+  "baseline_observed_fps": 6.159321546773556
+}

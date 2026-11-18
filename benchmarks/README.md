@@ -1,0 +1,123 @@
+# 实测记录
+
+实机数据来自 Raspberry Pi 5 4GB，使用 YOLOX-Nano。原始模型为 416×416，320/352 输入对照使用同一份训练权重。已复核的汇总和硬件验证记录位于 `results/`。含部署路径或现场信息的诊断日志仅在本地保留。摄像头方向校正为 180°，当前另启用左右镜像校正，置信度阈值保持 0.35。
+
+## 2026-11-08 树莓派 CPU / GPU 对照
+
+在同一台 Raspberry Pi 5 上比较现有 ONNX Runtime CPU、ncnn CPU 和 ncnn Vulkan 三条路径。后两组使用同一份转换模型，用于区分框架差异和启用 GPU 的影响。Vulkan 使用板载 V3D 7.1.7，驱动为 Mesa 23.2.1-1~bpo12+rpt3。
+
+| 后端 | 模型 p50 | 模型 p95 | 检测 p95 | 串行检测吞吐 |
+|---|---:|---:|---:|---:|
+| ONNX Runtime 1.20.1 CPU | 32.59 ms | 32.91 ms | 36.00 ms | 27.88 帧/s |
+| ncnn 1.0.20261020 CPU | 34.00 ms | 35.38 ms | 38.22 ms | 26.96 帧/s |
+| ncnn 1.0.20261020 Vulkan GPU | 219.80 ms | 224.97 ms | 228.96 ms | 4.45 帧/s |
+
+本次 320×320 FP32 测试中，Vulkan 模型推理中位耗时是现有 CPU 路径的 **6.75 倍**、同框架 ncnn CPU 的 **6.46 倍**。三组每轮各检出 225 个人员框。按帧以 IoU ≥ 0.5 做一对一匹配，两组 ncnn 均与 ONNX Runtime CPU 全部匹配。GPU 匹配框最小 IoU 为 **0.9999915**，最大置信度差为 **0.00000122**。这些数值衡量后端之间的输出一致性，独立标注集的准确率需另行评测。
+
+**测量口径**
+
+- 取公开 `vtest.avi` 的第 0、18、…、702 帧，共 40 帧。每组做 3 轮，每轮预热 5 帧后记录 40 帧，每组共 120 次计时。三轮轮换后端顺序。
+- 使用同一份 320×320 YOLOX-Nano 模型权重、FP32、2 个推理线程、0.35 人员置信度阈值和 0.45 NMS 阈值。三组共用项目的 BGR 预处理、YOLOX 解码和 NMS。pnnx 20261020 以 `fp16=0` 转换，脚本用等价的 `Reorg → Slice → Concat` 实现原图开头的 Focus 像素重排，并保留 pnnx 生成的权重文件。
+- 模型耗时包含一次同步推理及输出读回。检测耗时从已解码图像开始，包含预处理、推理和后处理。串行吞吐用检测平均耗时换算。相机采集、视频解码、ROI 跟踪、事件输出和预览均在计时范围之外。
+- 测试各组前后温度读数为 52.1～57.1°C，降频标志均为 `0x0`。另做独立驱动跟踪，GPU 组每多推理一帧新增 327 次成功的 `DRM_IOCTL_V3D_SUBMIT_CSD` 调用，ncnn CPU 组为 0 次。正式计时关闭了跟踪。
+
+**在树莓派复跑**
+
+```bash
+# 从当前克隆的仓库根目录运行
+mkdir -p .tmp .cache/gpu-benchmark
+export TMPDIR="$PWD/.tmp" PYTHONDONTWRITEBYTECODE=1
+export PYTHONPATH="$PWD/.cache/gpu-benchmark/python"
+
+# 首次准备，或实验缓存清理后执行。
+.venv/bin/python -m pip --disable-pip-version-check install --no-cache-dir --no-deps \
+  --target .cache/gpu-benchmark/python ncnn==1.0.20261020 pnnx==20261020
+.venv/bin/python benchmarks/compare_vulkan.py --prepare
+
+# 输出到新文件，保留原始记录。
+.venv/bin/python benchmarks/compare_vulkan.py > .tmp/pi-vulkan-repeat.json && \
+  mv .tmp/pi-vulkan-repeat.json benchmarks/results/pi-vulkan-repeat.json
+```
+
+逐帧计时、每帧检出数、素材哈希和各轮输出对比见 [实测 JSON](results/pi-vulkan-cpu-comparison.json)。驱动证据见 [硬件验证记录](results/pi-vulkan-hardware-verification.txt)。运行时和转换器版本见 [ncnn 发布页](https://github.com/Tencent/ncnn/releases/tag/20261020) 与 [pnnx 发布页](https://pypi.org/project/pnnx/20261020/)。
+
+## 2026-10-27 方向校正与帧率短测（历史基线）
+
+| 请求采集 FPS | ORT 线程 | 时长 | 实际处理 FPS | ORT p95 | 软件帧延迟 p95 | 最高温度 |
+|---|---|---|---|---|---|---|
+| 15 | 2 | 15 秒 | 13.30 | 66 ms | 84 ms | 63.35°C |
+| 30 | 2 | 20 秒 | 13.17 | 71 ms | 132 ms | 63.90°C |
+| 30 | 4 | 20 秒 | 14.63 | 66 ms | 126 ms | 68.85°C |
+
+这三组均为真实 USB 摄像头运行，场景随时间变化，属于短时运行观测。顺序测试的温度还受热积累影响。三组均为 0 处理错误、0 重连、无 swap 活动，降频标志均为 `0x0`。采集和推理均采用有界队列，过载时丢弃旧帧。
+
+30 FPS 是请求值，实际采集和实际推理速度另行统计。当时提高请求采集帧率及线程数只带来有限吞吐增益，软件帧延迟及温度上升，因此当时保留第一组配置。官方模型输入固定为 416×416，仅缩小摄像头分辨率不能减少模型计算量；本次通过生成不同固定输入尺寸的模型减少计算量。
+
+方向校正后的抽样图片检出一个人物，分数为 0.7659；这是单帧模型置信度，不是准确率或 F1，也不能据此量化旋转对准确率的改善。
+
+本地历史日志索引：
+
+- `results/pi-rotation-config.txt`：180° 配置写入与验证。
+- `results/pi-rotation-verify.txt`：树莓派 127 项测试、校正截图推理、15 秒运行及停止状态。
+- `results/pi-performance-check.txt`：两组 30 FPS 请求值下的完整运行汇总；实验使用项目内临时配置，原摄像头配置未更改。
+
+`inference_fps` 是单位运行时间内完成推理的数量，包含输入帧率限制；`model_compute_fps` 只由 ORT 调用时间换算。软件帧延迟从驱动读取完成开始，不包含传感器曝光及 USB 内部缓冲。表中 RSS 等进程指标只统计主进程，不能当作包括采集子进程的总资源占用。
+
+校正截图仅保存在忽略的 `data/images/`，不提交仓库。两小时稳定性、USB 真正拔插恢复和独立标注集评测仍待执行。
+
+## 连续预览、镜像与快速模型优化（当前配置）
+
+旧页面每 160 ms 请求一张图片，显示上限为 6.25 FPS；树莓派本机复现得到约 6.16 张不同画面/秒，检测稳态约 13.51 FPS。现在使用一条 MJPEG 连接连续发送最新画面，绘制/编码从推理线程移出，待绘制帧和编码后 JPEG 各只保留最新一份。预览宽度最多 480 像素，JPEG 质量 60；640×480 相机输入和事件原图不因此缩小。
+
+V4L2 单独探针在相同 640×480、30 FPS 请求值下测得：驱动缓冲 1 个时约 20.09 FPS，2 个时约 30.00 FPS。当前使用 2 个驱动缓冲，应用最新帧队列仍为 1。相机默认 YUYV 与 MJPG 单独读取均能达到 30 FPS，未改曝光、亮度或相机格式。
+
+固定 vtest 第 0、10、…、190 共 20 帧，以 2 个线程、相同 0.35 阈值比较：
+
+| 模型输入 | ORT 中位耗时 | ORT p95 | 总检出框数 | 与原模型框匹配比例，IoU≥0.5 |
+|---|---|---|---|---|
+| 416×416 | 60.70 ms | 68.53 ms | 136 | 参考 |
+| 352×352 | 41.28 ms | 41.54 ms | 126 | 87.50% |
+| 320×320 | 34.02 ms | 34.68 ms | 129 | 83.82% |
+
+匹配比例是相对于原模型输出的差异指标，不是对人工标注的准确率或召回率。小输入有小目标检测取舍；当前按流畅度需求选择 320，保留原始 416 及中间 352 模型。派生模型只修改固定输入及形状元数据，所有 initializer 字节逐一核对不变；manifest 同时记录原模型和派生文件 SHA-256。实际推理前也执行哈希校验。
+
+最终通过真实树莓派到 Windows 的 SSH 转发测量连续视频流 10.03 秒，共收到 214 帧，约 **21.33 FPS**，约 389 KiB/s。该次完整运行 13.25 秒（含启动）处理 282 帧，平均 **21.28 FPS**、采集 **28.38 FPS**；ORT p95 **41 ms**，软件帧延迟 p95 **78 ms**，最高温度 **63.35°C**，降频标志 `0x0`、无 swap 活动、0 处理错误。这里的网络传输统计与前面的本机诊断区分记录，用户网络变化会影响观看帧率。
+
+原始记录（公开仓库精选汇总，其他文件为本地历史诊断）：
+
+- `results/preview-before.json`：旧页面与原检测基线。
+- `results/model-size-comparison.json`：固定输入模型对照。
+- `results/v4l-buffer-probe.json`：驱动缓冲数对比。
+- `results/camera-format-probe.json`：相机格式单独读取对比。
+- `results/live-fps-comparison.json`：驱动缓冲仍为 1 时的不同模型完整流水线对照。
+- `results/optimized-camera.json`：最终相机运行统计。
+- `results/optimized-tunnel.json`（电脑端记录）：真实 SSH 传输帧率。
+- `results/fps-final-verify.txt`：最终自动化测试和采集检查。
+
+以上均为短时测试，不替代两小时稳定性及独立标注集验收。
+
+## 可写进简历的量化指标
+
+历史 320×320 实机基线（真实 USB 摄像头、640×480、请求 30 FPS、2 个 ORT 线程）可以明确写成：处理 **21.28 FPS**，模型推理 p95 **41 ms**，软件帧延迟 p95 **78 ms**，连续 MJPEG 预览接收 **21.33 FPS**，最高温度 **63.35°C**，降频 `0x0`，处理错误 **0**，过载丢帧比例 **24.7%**。这些数字来自 `results/optimized-camera.json` 和 `results/optimized-tunnel.json`，属于短时观测，不能替代长时间稳定性测试。
+
+每次运行的 JSON 还会记录：
+
+| 字段 | 含义 |
+|---|---|
+| `capture_fps` / `inference_fps` / `model_compute_fps` | 摄像头采集、完成推理、只计算模型调用的三种速度 |
+| `queue_drop_rate` / `camera_ipc_skipped_frames` | 应用队列替换比例、摄像头子进程到主进程的观测序号缺口 |
+| `end_to_end_p95_ms` / `event_output_p95_ms` | 检测帧龄 p95、事件截图/JSONL/MQTT 后台输出 p95 |
+| `focus_score_min` / `focus_rejected` | Laplacian 清晰度最低值、因失焦而跳过截图的事件数 |
+| `peak_rss_bytes` / `peak_temperature_c` / `throttled` | 主进程峰值内存、峰值温度和降频状态 |
+
+树莓派上重新采集一组可复现实验：
+
+```bash
+# 从当前克隆的仓库根目录运行
+.venv/bin/python -m edgevision.cli run --config config.local.yaml --input uvc \
+  --duration 60 --no-mqtt \
+  --json-out benchmarks/results/current-60s.json \
+  --trace benchmarks/results/current-60s.csv
+```
+
+把 JSON 中的字段填入简历前，注明输入分辨率、模型输入尺寸、请求 FPS、线程数和测试时长；没有人工标注集时，不填写 Precision、Recall、F1 或 mAP。
