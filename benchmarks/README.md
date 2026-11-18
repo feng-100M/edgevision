@@ -55,12 +55,6 @@ export PYTHONPATH="$PWD/.cache/gpu-benchmark/python"
 
 方向校正后的抽样图片检出一个人物，分数为 0.7659；这是单帧模型置信度，不是准确率或 F1，也不能据此量化旋转对准确率的改善。
 
-本地历史日志索引：
-
-- `results/pi-rotation-config.txt`：180° 配置写入与验证。
-- `results/pi-rotation-verify.txt`：树莓派 127 项测试、校正截图推理、15 秒运行及停止状态。
-- `results/pi-performance-check.txt`：两组 30 FPS 请求值下的完整运行汇总；实验使用项目内临时配置，原摄像头配置未更改。
-
 `inference_fps` 是单位运行时间内完成推理的数量，包含输入帧率限制；`model_compute_fps` 只由 ORT 调用时间换算。软件帧延迟从驱动读取完成开始，不包含传感器曝光及 USB 内部缓冲。表中 RSS 等进程指标只统计主进程，不能当作包括采集子进程的总资源占用。
 
 校正截图仅保存在忽略的 `data/images/`，不提交仓库。两小时稳定性、USB 真正拔插恢复和独立标注集评测仍待执行。
@@ -83,24 +77,9 @@ V4L2 单独探针在相同 640×480、30 FPS 请求值下测得：驱动缓冲 1
 
 最终通过真实树莓派到 Windows 的 SSH 转发测量连续视频流 10.03 秒，共收到 214 帧，约 **21.33 FPS**，约 389 KiB/s。该次完整运行 13.25 秒（含启动）处理 282 帧，平均 **21.28 FPS**、采集 **28.38 FPS**；ORT p95 **41 ms**，软件帧延迟 p95 **78 ms**，最高温度 **63.35°C**，降频标志 `0x0`、无 swap 活动、0 处理错误。这里的网络传输统计与前面的本机诊断区分记录，用户网络变化会影响观看帧率。
 
-原始记录（公开仓库精选汇总，其他文件为本地历史诊断）：
+采集、推理和队列替换计数见[相机运行记录](results/optimized-camera.json)，预览接收速率见[传输测量记录](results/optimized-tunnel.json)。
 
-- `results/preview-before.json`：旧页面与原检测基线。
-- `results/model-size-comparison.json`：固定输入模型对照。
-- `results/v4l-buffer-probe.json`：驱动缓冲数对比。
-- `results/camera-format-probe.json`：相机格式单独读取对比。
-- `results/live-fps-comparison.json`：驱动缓冲仍为 1 时的不同模型完整流水线对照。
-- `results/optimized-camera.json`：最终相机运行统计。
-- `results/optimized-tunnel.json`（电脑端记录）：真实 SSH 传输帧率。
-- `results/fps-final-verify.txt`：最终自动化测试和采集检查。
-
-以上均为短时测试，不替代两小时稳定性及独立标注集验收。
-
-## 可写进简历的量化指标
-
-历史 320×320 实机基线（真实 USB 摄像头、640×480、请求 30 FPS、2 个 ORT 线程）可以明确写成：处理 **21.28 FPS**，模型推理 p95 **41 ms**，软件帧延迟 p95 **78 ms**，连续 MJPEG 预览接收 **21.33 FPS**，最高温度 **63.35°C**，降频 `0x0`，处理错误 **0**，过载丢帧比例 **24.7%**。这些数字来自 `results/optimized-camera.json` 和 `results/optimized-tunnel.json`，属于短时观测，不能替代长时间稳定性测试。
-
-每次运行的 JSON 还会记录：
+## 运行指标与复测
 
 | 字段 | 含义 |
 |---|---|
@@ -119,5 +98,3 @@ V4L2 单独探针在相同 640×480、30 FPS 请求值下测得：驱动缓冲 1
   --json-out benchmarks/results/current-60s.json \
   --trace benchmarks/results/current-60s.csv
 ```
-
-把 JSON 中的字段填入简历前，注明输入分辨率、模型输入尺寸、请求 FPS、线程数和测试时长；没有人工标注集时，不填写 Precision、Recall、F1 或 mAP。

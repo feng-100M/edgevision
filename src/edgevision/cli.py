@@ -1,10 +1,7 @@
-"""命令行入口；所有生成文件都限制在项目目录内。
+"""命令行入口。
 
-CLI 是学习和验收的外层入口：``infer`` 验证单图模型，``replay`` 验证
-离线流水线，``run`` 才会打开实时输入，``check`` 只检查输入设备。
-
-所有子命令共享同一条路径边界和配置加载逻辑；这样离线练习、设备检查和
-长期运行产生的结果都不会写出项目目录，也不会绕过模型校验。
+``infer`` 处理单张图像，``replay`` 回放视频，``run`` 启动检测流水线，
+``check`` 检查输入设备。生成文件的路径均限制在项目目录内。
 """
 import argparse
 from dataclasses import asdict
@@ -51,7 +48,7 @@ def output_path(value, root):
 
 def emit(result, destination, root):
     """同时打印 JSON，并按需在项目内写出一份结果文件。"""
-    # 终端输出和 JSON 文件使用同一份序列化结果，便于学习时复制和复核。
+    # 终端输出和 JSON 文件使用同一份序列化结果，保持两处报告一致。
     text = json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)
     if destination:
         p = output_path(destination, root)
