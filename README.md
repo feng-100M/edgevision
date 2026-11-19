@@ -6,15 +6,13 @@ EdgeVision 在 Raspberry Pi 5 上使用 USB 摄像头检测人员进出指定区
 
 ## 检测演示
 
-[![同一名行人越过蓝线，左边旧版、右边新版](docs/demo/detection-replay.gif)](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
+[![区域进出检测：行人框上显示进入和离开事件](docs/demo/detection-replay.gif)](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
 
-[播放或下载新旧版同帧对照视频（24 秒，中文字幕）](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
+[播放或下载演示视频（19 秒）](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
 
-看右侧绿色框底的圆点。**10.64 秒**，圆点越过下方蓝线，系统确认进入，得分 0.76。**10.84 秒**，左侧旧版漏掉了画面里的人，新版仍显示区内 1 人。**13.08 秒**，旧版以 0.39 又报了一次进入，新版持续跟踪同一人。**13.60 秒**，圆点越过左侧蓝线，系统确认离开。
+蓝线是检测区边界，框底圆点是判定位置。事件确认时，画面短暂停留，在对应行人的框上标出绿色「进入事件」或橙色「离开事件」。按画面右上角的原片时间，1.56 秒进入、6.56 秒离开，10.64 秒再次有人进入、13.60 秒离开。
 
-本片的辅助检测将静止背景淡化，并将辅助画面顺时针旋转 90°。设备仍用原图检测静止人员。0.35 是人体框门槛，0.70 是确认事件那一帧的最低分。对这段录像的 4 条人工标注，电脑上旧版命中 2 条、误报 4 条、漏报 2 条，新版命中 4 条、误报 0 条、漏报 0 条。树莓派使用同一配置从头回放，命中 3 条、误报 0 条、漏报 1 条。录像同时用于选择参数，其他机位需要单独验证。[复测与复现命令](benchmarks/README.md#walk1-越界复测)
-
-演示基于 CAVIAR 的 `Walk1` 录像和项目的真实逐帧推理结果，加入同帧对照、局部放大与定格字幕。原始素材由 EC Funded CAVIAR project/IST 2001 37540 提供，视频与动图预览沿用 CC BY-SA 许可。[CAVIAR 数据与许可](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA1/)
+视频使用 EdgeVision 在电脑上回放 CAVIAR 的 `Walk1` 录像产生的逐帧记录。原始素材由 EC Funded CAVIAR project/IST 2001 37540 提供，视频与动图预览沿用 CC BY-SA 许可。[CAVIAR 数据与许可](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA1/) · [电脑和树莓派复测结果](benchmarks/README.md#walk1-越界复测)
 
 完成下方安装和素材下载后，在仓库根目录执行，即可用项目自带的 OpenCV 样例做相同操作。打开终端打印的预览地址；演示结束时点击 **停止检测**。
 
