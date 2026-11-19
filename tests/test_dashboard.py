@@ -22,6 +22,11 @@ assert.match(ui.reasonText({reason:'cooldown',cooldown_remaining:1.25}), /1.3/);
 assert.match(ui.mqttText({state:'acknowledged'}), /Broker 已确认/);
 assert.match(ui.mqttText({state:'pending'}), /等待 Broker/);
 assert.match(ui.mqttText(undefined), /未知/);
+assert.deepEqual(ui.countTransitions([]), {entered: 0, left: 0});
+assert.deepEqual(ui.countTransitions([
+  {event_type:'person_entered'}, {event_type:'person_entered'},
+  {event_type:'person_left'}, {event_type:'other'}
+]), {entered: 2, left: 1});
 console.log('DASHBOARD_BEHAVIOR_OK');
 '''
     result = subprocess.run([node, '-e', script, str(script_path)],

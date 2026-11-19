@@ -60,3 +60,22 @@ mosquitto_sub -h 127.0.0.1 -t 'edgevision/alerts/health' -v
 | `mqtt_acknowledged`、`mqtt_outbox_pending` | 本次收到的 PUBACK 数（可能包含上次运行的积压）与磁盘上尚待确认的事件数。 |
 | `output_queue_dropped`、`snapshot_skipped` | 截图队满次数，以及因模糊、队满、配额或写入失败等原因未产出截图的次数。 |
 | `storage_failed`、`mqtt_failed` | 事件持久化失败次数、MQTT 发布尝试或确认失败次数。断线等待重试的记录计入磁盘待发量。 |
+
+
+## 事件图表与 SQLite 查询
+
+预览页的「历史」按需读取设备端仍保留的最近 50 条记录，条形图和下方明细使用同一批数据。「刷新」会重新读取记录。检测端原始事件位于 `output/YYYY-MM-DD/events.jsonl`，每行一个事件；跨天统计需包含所选日期的全部记录。
+
+若关注值班端实际收件，运行 `edgevision receive` 后，可只读打开 `diagnostics/receipts.sqlite3`。下例按**事件发生的北京时间**统计各小时收齐的进入和离开事件。收件表以 `event_id` 去重，断线后补发的事件仍归入发生时段。
+
+```sql
+SELECT strftime('%Y-%m-%d %H:00', json_extract(payload, '$.occurred_at'), '+8 hours') AS hour_bjt,
+       json_extract(payload, '$.event_type') AS event_type,
+       COUNT(*) AS received_events
+FROM receipts
+WHERE json_extract(payload, '$.event_type') IN ('person_entered', 'person_left')
+GROUP BY hour_bjt, event_type
+ORDER BY hour_bjt, event_type;
+```
+
+要分析设备实际生成且成功落盘的全量事件，可另外从 JSONL 构建 SQLite 分析表，以 `event_id` 为主键，并按 `occurred_at` 和 `roi_name` 建索引。这样可以按日期、区域绘制小时趋势，也可用同一事件 ID 对照值班端的收件库。当前预览页直接读取 JSONL。

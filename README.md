@@ -4,6 +4,20 @@ EdgeVision 在 Raspberry Pi 5 上使用 USB 摄像头检测人员进出指定区
 
 [v0.2.0 版本说明与树莓派验收结果](CHANGELOG.md)
 
+## 检测演示
+
+![公开录像实际回放，显示人员框、区域内人数、最新事件截图与历史进出统计](docs/demo/detection-replay.gif)
+
+先看人员框底部的判定点与蓝色区域的位置，再看右侧新增的进入或离开事件。点击事件截图可核对当时的画面。切换到 **历史**，可对照最近保存的进出事件数量与逐条记录。
+
+动图录自本机浏览器，用 YOLOX-Nano 回放 CAVIAR 的 `Walk1`，关闭 MQTT。历史图表统计模型产生的事件条数，同一人员可能多次触发。原始素材由 EC Funded CAVIAR project/IST 2001 37540 提供，演示加入了检测框和界面叠加，动图沿用 CC BY-SA 许可。[CAVIAR 数据与许可](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA1/)
+
+完成下方安装和素材下载后，在仓库根目录执行，即可用项目自带的 OpenCV 样例做相同操作。打开终端打印的预览地址；演示结束时点击 **停止检测**。
+
+```bash
+.venv/bin/edgevision replay --mode sync --preview --loop --no-mqtt
+```
+
 ## 工程亮点
 
 - **优先处理最新画面。** 摄像头在独立进程中读取。推理忙时，采集线程用新帧替换仍在等待的旧帧，避免告警持续落后于现场。逐帧分析录像时可切换到同步回放。
