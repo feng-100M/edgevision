@@ -112,6 +112,8 @@ def parser():
                 action="store_true",
                 help="Loopback-only live view with ROI and tracks")
             s.add_argument("--preview-port", type=int, default=8765)
+        if name in ("replay", "run", "benchmark"):
+            s.add_argument("--motion-assist-rotation", type=int, choices=[0, 90, 180, 270])
         if name == "infer":
             s.add_argument("--image", required=True)
             s.add_argument("--model")
@@ -283,6 +285,8 @@ def _main(args):
         if args.threads < 1:
             raise ValueError("threads must be positive")
         cfg.model.threads = args.threads
+    if args.motion_assist_rotation is not None:
+        cfg.model.motion_assist_rotation = args.motion_assist_rotation
     if args.no_mqtt:
         cfg.mqtt.enabled = False
     # replay/run 共用完整 Pipeline，区别只来自输入源和命令行的节奏参数。
@@ -291,7 +295,8 @@ def _main(args):
         cfg.model.path,
         cfg.model.threads,
         cfg.model.confidence,
-        cfg.model.nms)
+        cfg.model.nms,
+        cfg.model.motion_assist_rotation)
     pipeline = Pipeline(cfg, source, detector)
     preview = None
     if args.preview:
@@ -326,6 +331,8 @@ def _main(args):
                    "model_input": list(detector.size),
                    "ort_threads": cfg.model.threads,
                    "confidence": cfg.model.confidence,
+                   "confirmation_confidence": cfg.events.confirmation_confidence,
+                   "motion_assist_rotation": cfg.model.motion_assist_rotation,
                    "nms": cfg.model.nms,
                    "realtime": not args.fast,
                    "source": kind,

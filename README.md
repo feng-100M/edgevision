@@ -2,19 +2,19 @@
 
 EdgeVision 在 Raspberry Pi 5 上使用 USB 摄像头检测人员进出指定区域。设备在本地完成 YOLOX-Nano 推理、轨迹关联和区域判定，生成带时间戳的事件记录、现场截图和可选的 MQTT 告警。
 
-[v0.2.0 版本说明与树莓派验收结果](CHANGELOG.md)
+[v0.2.1 版本说明与树莓派验收结果](CHANGELOG.md)
 
 ## 检测演示
 
-[![视频预览：轨迹 22 的原速回放、慢放和同步事件计数](docs/demo/detection-replay.gif)](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
+[![同一名行人越过蓝线，左边旧版、右边新版](docs/demo/detection-replay.gif)](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
 
-[播放或下载 MP4（21 秒，中文字幕）](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
+[播放或下载新旧版同帧对照视频（24 秒，中文字幕）](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
 
-先看原速，再跟随慢放观察 **#22 框底的圆点**。原片 13.08 秒时，#22 首次出现就在蓝区内，系统记「进入」，累计事件从 4 变成 5。13.40 秒时仍检测到同一人，圆点刚到区外，区域内人数从 1 变成 0，累计事件变成 6。右侧数字取自左侧画面的同一帧。
+看右侧绿色框底的圆点。**10.64 秒**，圆点越过下方蓝线，系统确认进入，得分 0.76。**10.84 秒**，左侧旧版漏掉了画面里的人，新版仍显示区内 1 人。**13.08 秒**，旧版以 0.39 又报了一次进入，新版持续跟踪同一人。**13.60 秒**，圆点越过左侧蓝线，系统确认离开。
 
-13.08 秒的 0.39 是人体检测分数。按人工框衍生的标注和 ±1 秒匹配窗口，这条「进入」是误报。片尾对照 0.35 与 0.80 两档人体检测门槛，两次都从头运行相同的 611 帧。[完整阈值对照](benchmarks/README.md#walk1-检测阈值对照)
+本片的辅助检测将静止背景淡化，并将辅助画面顺时针旋转 90°。设备仍用原图检测静止人员。0.35 是人体框门槛，0.70 是确认事件那一帧的最低分。对这段录像的 4 条人工标注，电脑上旧版命中 2 条、误报 4 条、漏报 2 条，新版命中 4 条、误报 0 条、漏报 0 条。树莓派使用同一配置从头回放，命中 3 条、误报 0 条、漏报 1 条。录像同时用于选择参数，其他机位需要单独验证。[复测与复现命令](benchmarks/README.md#walk1-越界复测)
 
-演示基于 CAVIAR 的 `Walk1` 录像和项目的真实逐帧推理结果，加入检测叠加、慢放与定格字幕。原始素材由 EC Funded CAVIAR project/IST 2001 37540 提供，视频与动图预览沿用 CC BY-SA 许可。[CAVIAR 数据与许可](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA1/)
+演示基于 CAVIAR 的 `Walk1` 录像和项目的真实逐帧推理结果，加入同帧对照、局部放大与定格字幕。原始素材由 EC Funded CAVIAR project/IST 2001 37540 提供，视频与动图预览沿用 CC BY-SA 许可。[CAVIAR 数据与许可](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA1/)
 
 完成下方安装和素材下载后，在仓库根目录执行，即可用项目自带的 OpenCV 样例做相同操作。打开终端打印的预览地址；演示结束时点击 **停止检测**。
 

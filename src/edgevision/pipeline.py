@@ -154,7 +154,9 @@ class Pipeline:
                 roi_name,
                 polygon,
                 self.config.events.cooldown_seconds,
-                self.config.events.emit_leave)
+                self.config.events.emit_leave,
+                full_frame=not self.config.roi.enabled,
+                confirmation_confidence=self.config.events.confirmation_confidence)
         detections = self.detector.detect(frame.image)
         # 回放使用媒体时间推进状态机，实时输入使用 captured_at；Event 自己仍记录 UTC 时间。
         clock = frame.source_time if frame.source_time is not None else frame.captured_at

@@ -36,6 +36,7 @@ class ModelConfig:
     threads: int = 2
     confidence: float = .35
     nms: float = .45
+    motion_assist_rotation: int | None = None
 
 
 @dataclass
@@ -49,6 +50,7 @@ class RoiConfig:
 class EventConfig:
     cooldown_seconds: float = 2.
     emit_leave: bool = True
+    confirmation_confidence: float = .70
 
 
 @dataclass
@@ -124,6 +126,9 @@ def load_config(path):
                 270):
             raise ConfigError(
                 "input.rotation must be an integer: 0, 90, 180 or 270 clockwise")
+        assist = config.model.motion_assist_rotation
+        if assist is not None and (type(assist) is not int or assist not in (0, 90, 180, 270)):
+            raise ConfigError("model.motion_assist_rotation must be null, 0, 90, 180 or 270")
         if not isinstance(config.input.mirror_horizontal, bool):
             raise ConfigError("input.mirror_horizontal must be a boolean")
         if not isinstance(config.roi.enabled, bool):
@@ -143,8 +148,9 @@ def load_config(path):
         if not math.isfinite(config.input.min_sharpness) or config.input.min_sharpness < 0:
             raise ConfigError("input.min_sharpness must be finite and nonnegative")
         for label, value in (
+                ("confirmation_confidence", config.events.confirmation_confidence),
                 ("confidence", config.model.confidence), ("nms", config.model.nms)):
-            if not math.isfinite(value) or not 0 < value <= 1:
+            if isinstance(value, bool) or not math.isfinite(value) or not 0 < value <= 1:
                 raise ConfigError(f"{label} must be in (0,1]")
         if not math.isfinite(
                 config.events.cooldown_seconds) or config.events.cooldown_seconds < 0:

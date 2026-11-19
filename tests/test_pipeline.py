@@ -10,7 +10,7 @@ class Frames:
     reconnects=0
     def __iter__(self):
         self.start_time=time.monotonic()
-        for i,x in enumerate([32,41,44,32]):
+        for i,x in enumerate([32,32,44,44,32,32]):
             yield Frame(i,time.monotonic(),np.zeros((100,100,3),np.uint8),"synthetic",i*.1)
     def close(self):
         pass
@@ -23,7 +23,7 @@ class Boxes:
         i=self.i;self.i+=1
         if i==0 and self.fail_first:
             raise RuntimeError("Injected inference error")
-        x=[32,41,44,32][i]
+        x=[32,32,44,44,32,32][i]
         return [Detection(x-4,10,x+4,50,.9)]
 
 def config(tmp_path):
@@ -41,7 +41,7 @@ def test_pipeline_generates_enter_leave_and_persists(tmp_path):
     summary=p.run(mode="sync")
     rows=[json.loads(line) for f in tmp_path.rglob("events.jsonl") for line in f.read_text().splitlines()]
     assert [r["event_type"] for r in rows] == ["person_entered","person_left"]
-    assert summary["processed_frames"]==4
+    assert summary["processed_frames"]==6
     assert summary["events"]==2
     assert summary["errors"]==0
     assert summary["event_end_to_end_p95_ms"] is not None
@@ -57,14 +57,14 @@ def test_blurry_event_is_recorded_without_blocking_snapshot_write(tmp_path):
 def test_single_frame_failure_does_not_abort_replay(tmp_path):
     from edgevision.pipeline import Pipeline
     summary=Pipeline(config(tmp_path),Frames(),Boxes(True)).run(mode="sync")
-    assert summary["processed_frames"]==3
+    assert summary["processed_frames"]==5
     assert summary["errors"]==1
 
 def test_latest_pipeline_bounded_and_shuts_down(tmp_path):
     from edgevision.pipeline import Pipeline
     summary=Pipeline(config(tmp_path),Frames(),Boxes()).run(mode="latest")
-    assert summary["capture_frames"]==4
-    assert summary["processed_frames"]+summary["queue_dropped_frames"]==4
+    assert summary["capture_frames"]==6
+    assert summary["processed_frames"]+summary["queue_dropped_frames"]==6
     assert summary["max_queue_size"]<=1
 
 def test_evaluation_matches_each_truth_once_and_counts_duplicates():
@@ -158,7 +158,7 @@ def test_preview_explains_outside_bottom_clipped_box_and_mqtt_state(tmp_path):
         def update(self, frame, detections, tracks, events, polygon, metrics):
             assert events == []
             assert metrics['inside_count'] == 0
-            assert metrics['track_diagnostics'][0]['reason'] == 'outside_roi'
+            assert metrics['track_diagnostics'][0]['reason'] == 'confirming_outside'
             assert metrics['track_diagnostics'][0]['bottom_clipped'] is True
     cfg=config(tmp_path)
     result=Pipeline(cfg,Frames(),Detector(),Preview()).run(mode='sync',max_frames=1)
@@ -173,11 +173,14 @@ def test_disabled_roi_treats_full_frame_as_detection_area(tmp_path):
             assert metrics['roi_enabled'] is False
             assert metrics['roi_name'] == '全画面'
             assert metrics['track_diagnostics'][0]['inside'] is True
-            assert metrics['track_diagnostics'][0]['reason'] == 'entered'
-            assert events and events[0].roi_name == '全画面'
+            if frame.seq == 0:
+                assert not events
+            else:
+                assert metrics['track_diagnostics'][0]['reason'] == 'present'
+                assert events and events[0].roi_name == '全画面'
     cfg = config(tmp_path)
     cfg.roi.enabled = False
-    result = Pipeline(cfg, Frames(), Boxes(), Preview()).run(mode='sync', max_frames=1)
+    result = Pipeline(cfg, Frames(), Boxes(), Preview()).run(mode='sync', max_frames=2)
     assert result['events'] == 1
 
 
@@ -314,6 +317,7 @@ def test_stalled_screenshot_worker_preserves_all_events(tmp_path, monkeypatch):
     class BurstSource(Frames):
         def __iter__(self):
             yield Frame(0, time.monotonic(), np.zeros((100, 100, 3), np.uint8), "burst", 0.)
+            yield Frame(1, time.monotonic(), np.zeros((100, 100, 3), np.uint8), "burst", .1)
             release.set()
 
     class BurstDetector:

@@ -15,6 +15,7 @@ model:
   threads: 2
   confidence: 0.35
   nms: 0.45
+  motion_assist_rotation: null  # Optional fixed-camera second pass, clockwise degrees.
 roi:
   name: restricted
   enabled: true
@@ -22,6 +23,7 @@ roi:
 events:
   cooldown_seconds: 2.0
   emit_leave: true
+  confirmation_confidence: 0.70  # Minimum person score on the confirming observation.
 output:
   directory: output
   max_bytes: 209715200

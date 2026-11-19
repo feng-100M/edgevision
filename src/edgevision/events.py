@@ -12,16 +12,22 @@ from datetime import datetime, timezone
 import math
 from uuid import uuid4
 
+import cv2
+import numpy as np
+
 from .geometry import bottom_center, point_in_polygon
 from .types import Event, Track
 
 
 @dataclass(slots=True)
 class _TrackState:
-    inside: bool
+    inside: bool | None
     last_seen: float
     last_enter: float | None = None
-    entry_emitted: bool = False
+    reason_inside: str = "inside_observed"
+    candidate: bool | None = None
+    observations: int = 0
+    frame: int = -1
 
 
 class EventEngine:
@@ -36,7 +42,8 @@ class EventEngine:
                  polygon: Sequence[Sequence[float]],
                  cooldown_seconds: float = 2.,
                  emit_leave: bool = True,
-                 state_timeout_seconds: float = 5.) -> None:
+                 state_timeout_seconds: float = 5., *,
+                 full_frame: bool = False, confirmation_confidence: float = .70) -> None:
         if not math.isfinite(cooldown_seconds) or cooldown_seconds < 0:
             raise ValueError("cooldown_seconds must be finite and nonnegative")
         if not math.isfinite(
@@ -48,6 +55,12 @@ class EventEngine:
         self.roi_name = roi_name
         self.polygon = tuple(tuple(float(value)
                              for value in vertex) for vertex in polygon)
+        if not 0 < confirmation_confidence <= 1:
+            raise ValueError("confirmation_confidence must be in (0,1]")
+        self.confirmation_confidence = confirmation_confidence
+        self.full_frame = full_frame
+        self._contour = np.array(self.polygon, dtype=np.float32)
+        self._frame = 0
         self.cooldown_seconds = cooldown_seconds
         self.emit_leave = emit_leave
         # 即使调用方给了更短的漏检过期时间，也不能让冷却状态提前消失。
@@ -94,43 +107,53 @@ class EventEngine:
         events = []
         diagnostics = []
         # 每条轨迹独立推进 inside、last_enter 和 last_seen 三个状态维度。
+        self._frame += 1
         for track in tracks:
-            inside = point_in_polygon(
-                bottom_center(
-                    track.detection.bbox),
-                self.polygon)
+            point = bottom_center(track.detection.bbox)
+            distance = cv2.pointPolygonTest(self._contour, point, True)
+            inside = distance >= 0
             state = self._states.get(track.track_id)
             if state is None:
-                state = _TrackState(False, timestamp)
+                state = _TrackState(False if self.full_frame else None, timestamp)
                 self._states[track.track_id] = state
             event_type = None
-            # 只有从外到内才可能进入；冷却窗口抑制同一轨迹的重复进入告警。
-            if inside and not state.inside:
-                state.entry_emitted = False
-                if state.last_enter is None or timestamp - \
-                        state.last_enter >= self.cooldown_seconds:
-                    event_type = "person_entered"
-                    state.last_enter = timestamp
-                    state.entry_emitted = True
-            # 离开需要实际观察到外部位置，并可由配置关闭。
-            elif state.inside and not inside and self.emit_leave:
-                event_type = "person_left"
-            if event_type == "person_entered":
-                reason = "entered"
-            elif event_type == "person_left":
-                reason = "left"
-            elif not inside:
-                reason = "outside_roi"
-            elif not state.inside:
-                reason = "cooldown"
+            if not self.full_frame and abs(distance) <= 2:
+                state.observations = 0
+                reason = "near_boundary"
+            elif inside == state.inside:
+                state.observations = 0
+                reason = state.reason_inside if inside else "outside_roi"
             else:
-                reason = "already_inside" if state.entry_emitted else "inside_suppressed"
+                if state.frame != self._frame - 1 or state.candidate != inside:
+                    state.observations = 0
+                state.candidate = inside
+                state.observations += 1
+                reason = "confirming_inside" if inside else "confirming_outside"
+                if state.observations >= 2 and track.detection.confidence >= self.confirmation_confidence:
+                    previous = state.inside
+                    state.inside = inside
+                    state.observations = 0
+                    reason = "inside_observed" if inside else "outside_roi"
+                    if inside and previous is False:
+                        if state.last_enter is None or timestamp - state.last_enter >= self.cooldown_seconds:
+                            event_type = "person_entered"
+                            state.last_enter = timestamp
+                            reason = "present" if self.full_frame else "entered"
+                        else:
+                            reason = "cooldown"
+                    elif not inside and previous is True and self.emit_leave:
+                        event_type = "person_left"
+                        reason = "left"
+                    if inside:
+                        state.reason_inside = {"entered": "already_inside", "cooldown": "inside_suppressed",
+                                               "present": "full_frame_present"}.get(reason, reason)
+            state.frame = self._frame
             remaining = max(0., self.cooldown_seconds - (timestamp - state.last_enter)) \
                 if state.last_enter is not None else 0.
             diagnostics.append({
                 "track_id": track.track_id, "bbox": list(track.detection.bbox),
                 "confidence": track.detection.confidence,
-                "point": list(bottom_center(track.detection.bbox)),
+                "point": list(point),
                 "inside": inside, "reason": reason,
                 "cooldown_remaining": remaining, "roi_name": self.roi_name,
             })
@@ -150,7 +173,6 @@ class EventEngine:
                         track_id=track.track_id,
                         source_time=source_time,
                     ))
-            state.inside = inside
             state.last_seen = timestamp
         self._last_timestamp = timestamp
         self.diagnostics = diagnostics

@@ -59,3 +59,16 @@ def test_class_scan_only_visits_candidates_above_threshold(monkeypatch):
     monkeypatch.setattr(np, "argmax", count_rows)
     assert len(postprocess(raw, (320, 320), (320, 320), 1.)) == 1
     assert visited == [1]
+
+
+@pytest.mark.parametrize("angle,box", [
+    (0, (10, 20, 30, 40)), (90, (20, 50, 40, 70)),
+    (180, (90, 40, 110, 60)), (270, (80, 10, 100, 30)),
+])
+def test_assisted_box_maps_to_original_nonsquare_image(angle, box):
+    from edgevision.detector import restore_detection
+    from edgevision.types import Detection
+
+    output = restore_detection(Detection(10, 20, 30, 40, .72), angle, (80, 120, 3))
+    assert output.bbox == box
+    assert output.confidence == .72

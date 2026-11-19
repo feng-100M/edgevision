@@ -10,11 +10,21 @@
     const p = Object.fromEntries(timeFormatter.formatToParts(date).map(x => [x.type, x.value]));
     return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute + ':' + p.second;
   }
+  function eventLabel(event) {
+    if (event.event_type === 'person_left') return '离开';
+    return event.roi_name === '全画面' ? '全画面发现人员' : '进入';
+  }
   function reasonText(track) {
     const descriptions = {
+      near_boundary: '判定点靠近边界，等待越线',
+      confirming_inside: '区内候选，等待确认',
+      confirming_outside: '区外候选，等待确认',
+      inside_observed: '已在区内出现，未观察到进入',
+      present: '全画面首次确认有人',
+      full_frame_present: '全画面持续有人',
       outside_roi: '底部判定点在区域外，未触发事件',
-      entered: '刚进入区域，已触发进入事件',
-      left: '刚离开区域，已触发离开事件',
+      entered: '已确认进入',
+      left: '已确认离开',
       already_inside: '持续在区域内，本次进入已告警，不重复触发',
       inside_suppressed: '本次进入曾被冷却抑制，持续停留不补发；离开后重新进入可再次判断'
     };
@@ -69,7 +79,7 @@
     for (const event of rows) {
       const tr = node('tr');
       tr.append(node('td', formatTime(event.occurred_at)));
-      tr.append(node('td', (event.event_type === 'person_entered' ? '进入区域' : '离开区域') + ' · #' + event.track_id));
+      tr.append(node('td', eventLabel(event) + ' · #' + event.track_id));
       tr.append(node('td', Number(event.confidence).toFixed(2)));
       const delivery = node('td');
       delivery.append(node('div', event.roi_name));
@@ -111,7 +121,7 @@
     const row = node('div', undefined, 'row');
     if (event.snapshot_path) row.append(snapshotLink(event));
     const text = node('div');
-    text.append(node('strong', (event.event_type === 'person_entered' ? '进入' : '离开') +
+    text.append(node('strong', eventLabel(event) +
       ' · 轨迹 #' + event.track_id));
     text.append(node('time', formatTime(event.occurred_at) + ' 北京时间'));
     row.append(text);

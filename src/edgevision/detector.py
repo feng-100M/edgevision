@@ -17,6 +17,7 @@ import time
 import cv2
 import numpy as np
 import onnxruntime as ort
+from .sources import rotate_image
 from .types import Detection
 
 
@@ -97,10 +98,25 @@ def postprocess(raw, size, image_shape, ratio, confidence=.35, nms=.45):
             for i in np.asarray(keep).flatten()]
 
 
+def restore_detection(detection, angle, shape):
+    """Map a box in a clockwise-rotated view to the original image edges."""
+    x1, y1, x2, y2 = detection.bbox
+    h, w = shape[:2]
+    if angle == 90:
+        box = (y1, h - x2, y2, h - x1)
+    elif angle == 180:
+        box = (w - x2, h - y2, w - x1, h - y1)
+    elif angle == 270:
+        box = (w - y2, x1, w - y1, x2)
+    else:
+        return detection
+    return Detection(*box, detection.confidence, detection.class_name)
+
+
 class Detector:
     """固定输入尺寸的 ONNX Runtime CPU 推理适配器。"""
 
-    def __init__(self, model_path, threads=2, confidence=.35, nms=.45):
+    def __init__(self, model_path, threads=2, confidence=.35, nms=.45, motion_assist_rotation=None):
         # 在启动阶段验证模型和固定输入形状，让运行中的 detect() 可以保持简单。
         self.path = Path(model_path)
         if not self.path.is_file():
@@ -124,14 +140,41 @@ class Detector:
         self.last_inference_ms = 0.
         self.confidence = confidence
         self.nms = nms
+        self.motion_assist_rotation = motion_assist_rotation
+        self.background = None if motion_assist_rotation is None else (
+            cv2.createBackgroundSubtractorMOG2(history=150, detectShadows=False))
+        self._mask_kernel = np.ones((5, 5), np.uint8)
 
     def detect(self, image):
         """完成一次预处理、推理和后处理，并记录模型耗时（毫秒）。"""
+        self.last_inference_ms = 0.
+        detections = self._infer(image)
+        if self.background is None:
+            return detections
+        # Retain the original view for stationary people. Only the auxiliary
+        # view suppresses static clutter and rotates sideways silhouettes.
+        mask = self.background.apply(image)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self._mask_kernel)
+        mask = cv2.dilate(mask, None, iterations=2)
+        if not np.any(mask):
+            return detections
+        weight = cv2.GaussianBlur(mask, (7, 7), 2).astype(np.float32)[:, :, None] / 255
+        auxiliary = (image * weight + (image * .15 + 100) * (1 - weight)).astype(np.uint8)
+        rotated = rotate_image(auxiliary, self.motion_assist_rotation)
+        extra = self._infer(rotated)
+        if not extra:
+            return detections
+        detections.extend(restore_detection(d, self.motion_assist_rotation, image.shape) for d in extra)
+        boxes = [[d.x1, d.y1, d.x2 - d.x1, d.y2 - d.y1] for d in detections]
+        keep = cv2.dnn.NMSBoxes(boxes, [d.confidence for d in detections], self.confidence, self.nms)
+        return [detections[i] for i in np.asarray(keep).flatten()]
+
+    def _infer(self, image):
         # 只把 ONNX Runtime 的计算时间计入模型耗时，预处理和后处理仍由端到端指标覆盖。
         tensor, ratio = preprocess(image, self.size)
         start = time.perf_counter()
         output = self.session.run(None, {self.name: tensor})[0]
-        self.last_inference_ms = (time.perf_counter() - start) * 1000
+        self.last_inference_ms += (time.perf_counter() - start) * 1000
         return postprocess(
             output,
             self.size,
