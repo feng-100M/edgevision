@@ -6,9 +6,9 @@ EdgeVision 在 Raspberry Pi 5 上使用 USB 摄像头检测人员进出指定区
 
 ## 检测演示
 
-[![区域进出检测：行人框上显示进入和离开事件](docs/demo/detection-replay.gif)](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
+[![区域进出检测：行人框上显示进入和离开事件](docs/demo/entry-exit-0319677731.gif)](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/entry-exit-948356d0d9.mp4)
 
-[播放或下载演示视频（19 秒）](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
+[播放或下载演示视频（19 秒）](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/entry-exit-948356d0d9.mp4)
 
 蓝线是检测区边界，框底圆点是判定位置。事件确认时，画面短暂停留，在对应行人的框上标出绿色「进入事件」或橙色「离开事件」。按画面右上角的原片时间，1.56 秒进入、6.56 秒离开，10.64 秒再次有人进入、13.60 秒离开。
 
