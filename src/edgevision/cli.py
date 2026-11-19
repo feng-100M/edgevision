@@ -63,6 +63,15 @@ def parser():
     p = argparse.ArgumentParser(
         description="Offline EdgeVision person intrusion detection")
     sub = p.add_subparsers(dest="command", required=True)
+    evaluate = sub.add_parser("evaluate")
+    evaluate.add_argument("--predicted", nargs="+", required=True, help="Prediction JSONL files")
+    evaluate.add_argument("--annotations", required=True, help="JSON with clip_seconds and events")
+    evaluate.add_argument("--window", type=float, default=1.)
+    evaluate.add_argument("--json-out")
+    receiver = sub.add_parser("receive")
+    receiver.add_argument("--config", default=str(DEFAULT_ROOT / "config.example.yaml"))
+    receiver.add_argument("--db", default="diagnostics/receipts.sqlite3")
+    receiver.add_argument("--client-id", default="edgevision-duty")
     for name in (
         "check",
         "infer",
@@ -120,11 +129,34 @@ def _main(args):
     """执行已解析的命令；这里集中处理路径、模型校验和输入选择。"""
     # 先锁定项目根和配置，再允许具体子命令读取模型、视频或摄像头。
     root = DEFAULT_ROOT.resolve()
+    if args.command == "evaluate":
+        from .evaluation import evaluate_events
+        annotations = json.loads(Path(args.annotations).read_text(encoding="utf8"))
+        if (not isinstance(annotations, dict) or not isinstance(annotations.get("events"), list)
+                or not isinstance(annotations.get("clip_seconds"), dict)):
+            raise ValueError("Annotations need clip_seconds and events")
+        predicted = []
+        for path in args.predicted:
+            with Path(path).open(encoding="utf8") as stream:
+                predicted.extend(json.loads(line) for line in stream if line.strip())
+        try:
+            report = evaluate_events(predicted, annotations["events"], args.window, annotations["clip_seconds"])
+        except (TypeError, KeyError, AttributeError) as exc:
+            raise ValueError(f"Invalid evaluation data: {exc}") from exc
+        emit(report, args.json_out, root)
+        return 0
     if not Path(args.config).resolve().is_relative_to(root):
         raise ValueError("Configuration must stay inside project directory")
     cfg = load_config(args.config)
     # 即使用户传入自定义 YAML，也强制输出目录留在项目写入边界内。
     output_path(cfg.output.directory, root)
+    if args.command == "receive":
+        from .receiver import receive
+        path = output_path(args.db, root)
+        if path.is_relative_to(cfg.output.directory):
+            raise ValueError("Receiver database must be outside event storage")
+        receive(cfg.mqtt, path, args.client_id)
+        return 0
     if args.json_out:
         output_path(args.json_out, root)
     cv2.setNumThreads(1)
@@ -266,7 +298,8 @@ def _main(args):
         # 预览只作为流水线旁路启动，停止按钮通过 pipeline.stop() 结束本次运行。
         from .preview import PreviewServer
         preview = PreviewServer(args.preview_port, on_stop=pipeline.stop,
-                                event_store=pipeline.storage, mqtt_status=pipeline.mqtt.status)
+                                event_store=pipeline.storage, mqtt_status=pipeline.mqtt.status,
+                                frame_health=pipeline.frame_health.status)
         pipeline.preview = preview
         logging.info("Live preview: %s", preview.url)
 

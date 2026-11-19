@@ -8,7 +8,9 @@
 """
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from collections import defaultdict
 import json
+import logging
 import os
 import re
 import shutil
@@ -36,6 +38,7 @@ class EventStorage:
         self.retention_days = retention_days
         self.min_free_bytes = min_free_bytes
         self.cleaned_events = 0
+        self.queue_delivery = False
         self._lock = threading.RLock()
         # History reads can be slow on the Pi.  Keep their index independent of
         # the save lock so an HTTP request cannot pause the detector loop.
@@ -172,7 +175,7 @@ class EventStorage:
         # 先完整写入同目录临时文件并 fsync，再原子替换正式日志，避免留下半行 JSON。
         temp = self._safe(path.with_suffix(".tmp"))
         try:
-            with temp.open("w", encoding="utf-8") as out:
+            with temp.open("w", encoding="utf-8", newline="\n") as out:
                 out.write(
                     "".join(
                         json.dumps(
@@ -186,39 +189,111 @@ class EventStorage:
             if temp.is_file():
                 temp.unlink()
 
-    def _trim(self, required, protected_id):
-        """删除最旧且属于本存储的记录，直到新事件有安全空间。"""
-        # 只有过期、超配额或低于最小剩余空间时才清理，并始终跳过本次待保护事件。
+    def _plan_save(self, target, record, required):
+        """Plan evictions without modifying any existing evidence."""
         rows = self._rows()
-        now = datetime.now(timezone.utc)
-        # 只统计本存储目录中的文件；删除动作也只针对已验证的 JSONL 和 JPEG。
-        total = sum(
-            self._safe(p).stat().st_size for p in self.root.rglob("*") if p.is_file())
+        total = self._usage()
+        free = shutil.disk_usage(self.root).free
+        needed = max(total + required - self.max_bytes,
+                     self.min_free_bytes + required - free, 0)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self.retention_days)
+        by_log = defaultdict(list)
         for log, row in rows:
-            expired = datetime.fromisoformat(row["occurred_at"].replace(
-                "Z", "+00:00")) < now - timedelta(days=self.retention_days)
-            insufficient = shutil.disk_usage(
-                self.root).free - required < self.min_free_bytes
-            if not expired and total + required <= self.max_bytes and not insufficient:
-                break
-            if row["event_id"] == protected_id:
+            if row["event_id"] == record["event_id"]:
+                raise StorageError("Event ID already exists")
+            by_log[log].append(row)
+        removals = defaultdict(set)
+        snapshots = defaultdict(list)
+        reclaimed = 0
+        for log, row in sorted(rows, key=lambda item: item[1]["occurred_at"]):
+            stamp = datetime.fromisoformat(row["occurred_at"].replace("Z", "+00:00"))
+            if stamp >= cutoff and reclaimed >= needed:
                 continue
-            snap = self._safe(
-                self.root /
-                row["snapshot_path"]) if row.get("snapshot_path") else None
-            current = [x for lp, x in self._rows() if lp ==
-                       log and x["event_id"] != row["event_id"]]
-            previous_size = log.stat().st_size
-            self._rewrite(log, current)
-            total += log.stat().st_size - previous_size
-            if snap and snap.is_file():
-                total -= snap.stat().st_size
-                snap.unlink()
-            self.cleaned_events += 1
-        if total + required > self.max_bytes or shutil.disk_usage(
-                self.root).free - required < self.min_free_bytes:
-            raise StorageError(
-                "Event storage capacity or minimum free-space threshold exceeded")
+            if row.get("delivery_state") == "pending":
+                continue
+            if not removals[log]:
+                # Account for line endings and formatting of older JSONL files.
+                reclaimed += log.stat().st_size - sum(self._line_size(r) for r in by_log[log])
+            removals[log].add(row["event_id"])
+            reclaimed += self._line_size(row)
+            if row["snapshot_path"]:
+                snap = self._safe(self.root / row["snapshot_path"])
+                if snap.is_file():
+                    reclaimed += snap.stat().st_size
+                    snapshots[log].append(snap)
+        if reclaimed < needed:
+            raise StorageError("Event storage capacity or minimum free-space threshold exceeded")
+        # Commit the new event first. A failed new write must leave every victim intact.
+        retained = {log: [r for r in by_log[log] if r["event_id"] not in ids]
+                    for log, ids in removals.items()}
+        new_rows = retained.pop(target, by_log[target]) + [record]
+        return new_rows, retained, snapshots, removals
+
+    @staticmethod
+    def _line_size(row):
+        return len((json.dumps(row, ensure_ascii=False) + "\n").encode("utf8"))
+
+    def _usage(self):
+        # Upgrades may leave the former service trace here. It is unrelated to
+        # the event quota but still contributes to actual disk free-space pressure.
+        legacy = self.root / "service-frames.csv"
+        return sum(self._safe(p).stat().st_size for p in self.root.rglob("*")
+                   if p.is_file() and p != legacy)
+
+    def pending_events(self):
+        return [row for _, row in self._indexed_rows() if row.get("delivery_state") == "pending"]
+
+    def acknowledge(self, event_ids):
+        """Commit broker receipts before the sender releases these IDs."""
+        with self._lock:
+            groups = defaultdict(list)
+            changed = set()
+            for log, row in self._rows():
+                if row["event_id"] in event_ids and row.get("delivery_state") == "pending":
+                    row["delivery_state"] = "acked"
+                    changed.add(log)
+                groups[log].append(row)
+            for log in changed:
+                self._rewrite(log, groups[log])
+            self._invalidate_index()
+
+    def attach_snapshot(self, event, image):
+        """Attach an optional JPEG only while the durable record still exists."""
+        ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        if not ok:
+            raise StorageError("JPEG encoding failed")
+        with self._lock:
+            day = datetime.fromisoformat(event.occurred_at.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+            log = self._safe(self.root / day / "events.jsonl")
+            rows = [row for path, row in self._rows() if path == log]
+            row = next((r for r in rows if r["event_id"] == event.event_id), None)
+            if row is None:
+                return False
+            snap = self._safe(log.parent / (event.event_id + ".jpg"))
+            if snap.exists():
+                raise StorageError("Snapshot already exists")
+            previous = self._line_size(row)
+            row["snapshot_path"] = snap.relative_to(self.root).as_posix()
+            row["snapshot_note"] = None
+            required = encoded.nbytes + self._line_size(row) - previous
+            if (self._usage() + required > self.max_bytes or
+                    shutil.disk_usage(self.root).free - required < self.min_free_bytes):
+                return False
+            temp = self._safe(snap.with_suffix(".jpg.tmp"))
+            try:
+                temp.write_bytes(encoded.tobytes())
+                os.replace(temp, snap)
+                try:
+                    self._rewrite(log, rows)
+                except Exception:
+                    snap.unlink()
+                    raise
+            finally:
+                temp.unlink(missing_ok=True)
+            event.snapshot_path = row["snapshot_path"]
+            event.snapshot_note = None
+            self._invalidate_index()
+            return True
 
     def save(self, event, image):
         """保存事件与截图，并避免 HTTP 历史读取观察到中间状态。"""
@@ -252,27 +327,38 @@ class EventStorage:
                 if not ok:
                     raise StorageError("JPEG encoding failed")
                 event.snapshot_path = snap.relative_to(self.root).as_posix()
-            line = json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
-            required = (encoded.nbytes if encoded is not None else 0) + len(line.encode("utf-8"))
+            record = event.to_dict()
+            if self.queue_delivery:
+                record["delivery_state"] = "pending"
+            required = (encoded.nbytes if encoded is not None else 0) + self._line_size(record)
             if required > self.max_bytes:
                 raise StorageError("Single event exceeds event storage budget")
-            self._trim(required, event.event_id)
-            rows = [
-                row for log,
-                row in self._rows() if log == folder /
-                "events.jsonl"]
+            log = self._safe(folder / "events.jsonl")
+            rows, retained, snapshots, removals = self._plan_save(log, record, required)
             # JPEG 先写临时文件再替换；日志随后原子重写，避免记录指向不存在的半文件。
             if encoded is not None:
                 temp = self._safe(snap.with_suffix(".jpg.tmp"))
-                temp.write_bytes(encoded.tobytes())
-                os.replace(temp, snap)
-                created = True
-            log = self._safe(folder / "events.jsonl")
-            self._rewrite(log, rows + [event.to_dict()])
+                try:
+                    temp.write_bytes(encoded.tobytes())
+                    os.replace(temp, snap)
+                    created = True
+                finally:
+                    temp.unlink(missing_ok=True)
+            self._rewrite(log, rows)
         except (OSError, ValueError, StorageError) as exc:
             # 清理已经创建的截图，并把事件恢复为“尚未保存”的状态交给流水线统计失败。
             if created and snap and snap.is_file():
                 snap.unlink()
             event.snapshot_path = None
             raise StorageError(f"{self.root}: {exc}") from exc
+        # Only unlink JPEGs once their own log no longer references them.
+        for path in removals:
+            try:
+                if path != log:
+                    self._rewrite(path, retained[path])
+                self.cleaned_events += len(removals[path])
+                for old_snapshot in snapshots[path]:
+                    old_snapshot.unlink()
+            except OSError:
+                logging.exception("Event saved; could not finish retention for %s", path)
         return event

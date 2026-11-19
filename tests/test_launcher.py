@@ -27,3 +27,6 @@ def test_relocated_checkout_reaches_setup_check(tmp_path):
                                capture_output=True, timeout=10)
     assert completed.returncode == 2
     assert "setup is incomplete" in completed.stderr
+def test_service_trace_is_opt_in():
+    script = (Path(__file__).parents[1] / "scripts/start_service.sh").read_text()
+    assert "--trace output/" not in script

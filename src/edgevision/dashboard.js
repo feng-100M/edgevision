@@ -27,7 +27,7 @@
   function mqttText(result) {
     if (!result) return '发送状态未知';
     const labels = {acknowledged: 'Broker 已确认', pending: '客户端已接收，等待 Broker 确认',
-      failed: '发送失败', disabled: '未启用 MQTT'};
+      queued: '已落盘，等待 Broker 确认', failed: '发送失败', disabled: '未启用 MQTT'};
     return labels[result.state] || '发送状态未知';
   }
   const api = {formatTime, reasonText, mqttText};
@@ -64,7 +64,8 @@
       tr.append(node('td', Number(event.confidence).toFixed(2)));
       const delivery = node('td');
       delivery.append(node('div', event.roi_name));
-      const result = states[event.event_id];
+      const durable = {acked: {state:'acknowledged'}, pending: {state:'queued'}};
+      const result = states[event.event_id] || durable[event.delivery_state];
       delivery.append(node('div', mqttText(result), result && result.state === 'failed' ? 'bad' : 'muted'));
       if (result && result.error) delivery.append(node('div', errorText(result.error), 'bad'));
       tr.append(delivery);
@@ -130,6 +131,15 @@
       if (s.seq !== undefined && s.seq !== previousSeq) { previousSeq = s.seq; lastFrameAt = Date.now(); }
       set('connection', s.seq === undefined ? '等待画面' :
         (Date.now() - lastFrameAt > 3000 ? '画面暂未更新，请检查摄像头' : '实时画面已连接'));
+      const health = s.frame_health;
+      if (health) {
+        const labels = {starting:'等待首帧', healthy:'画面正常', unavailable:'画面失联或处理失败', recovered:'画面已恢复'};
+        const recovery = health.last_recovery_at ? ' · 上次恢复 ' + formatTime(health.last_recovery_at) : '';
+        const stalled = health.state === 'healthy' && Date.now() - lastFrameAt > 3000;
+        set('connection', (stalled ? '画面暂未更新' : labels[health.state] || health.state) +
+          ' · 最近成功 ' + formatTime(health.last_success_at) +
+          ' · 连续失败 ' + health.consecutive_failures + recovery);
+      }
       set('clock', formatTime(s.server_time) + ' · 北京时间 UTC+8');
       renderRoiMode(s);
       set('people', s.detections || 0); set('inside', s.inside_count || 0);

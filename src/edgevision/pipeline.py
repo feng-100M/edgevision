@@ -6,13 +6,14 @@
 ``sync`` 模式让采集和处理在同一线程中顺序执行，作为不丢帧的吞吐基线；
 ``latest`` 模式把采集放到独立线程，队列只保留最新帧，优先降低处理结果的帧龄。
 """
-import csv
 import logging
-from pathlib import Path
 import queue
 import threading
 import time
 import cv2
+from .delivery import DeliveryWorker
+from .health import FrameHealth
+from .trace import FrameTrace
 from .events import EventEngine
 from .frame_queue import LatestFrameQueue, QueueClosed
 from .metrics import Metrics
@@ -25,7 +26,7 @@ LOG = logging.getLogger(__name__)
 
 
 class _EventOutputWorker:
-    """Write event evidence off the detector thread using a bounded queue."""
+    """Encode optional screenshots after the event record is durable."""
 
     def __init__(self, pipeline, max_pending=32):
         self.pipeline = pipeline
@@ -51,21 +52,11 @@ class _EventOutputWorker:
             event, image, queued_at = item
             try:
                 try:
-                    self.pipeline.storage.save(event, image)
+                    saved = self.pipeline.storage.attach_snapshot(event, image)
                 except Exception:
-                    self.pipeline.storage_failed += 1
-                    LOG.exception("Event storage failed for %s", event.event_id)
-                try:
-                    published = self.pipeline.mqtt.publish(event).ok
-                except Exception:
-                    published = False
-                    LOG.exception("MQTT publish failed for %s", event.event_id)
-                if self.pipeline.config.mqtt.enabled:
-                    if published:
-                        self.pipeline.mqtt_published += 1
-                    else:
-                        self.pipeline.mqtt_failed += 1
-                if event.snapshot_path:
+                    saved = False
+                    LOG.exception("Snapshot write failed for %s", event.event_id)
+                if saved:
                     self.pipeline.metrics.snapshot_saved += 1
                 else:
                     self.pipeline.metrics.snapshot_skipped += 1
@@ -113,12 +104,16 @@ class Pipeline:
         self.engine_shape = None
         self.active_roi_name = None
         self.active_roi_points = None
-        self.mqtt_published = 0
-        self.mqtt_failed = 0
+        self.storage.queue_delivery = config.mqtt.enabled
+        self.frame_health = FrameHealth(self.mqtt.publish_health)
+        if hasattr(self.source, "on_read_failure"):
+            self.source.on_read_failure = self.frame_health.observe
+        self.events_persisted = 0
+        self.delivery = None
         self.storage_failed = 0
         self.capture_error = None
         self._trace = None
-        self._writer = None
+        self.trace_failed = False
         self.output_queue_dropped = 0
         self._output = None
 
@@ -167,28 +162,38 @@ class Pipeline:
         events = self.engine.update(
             tracks, clock, frame.source_name, frame.source_time)
 
-        # 每个事件的本地存储和 MQTT 发布在有界旁路线程中处理，避免 JPEG
-        # 编码和磁盘写入把检测线程卡住；网络失败仍不能抹掉本地证据。
         sharpness = None
         for event in events:
+            queued_at = time.monotonic()
+            self.metrics.events += 1
             if sharpness is None:
                 gray = cv2.cvtColor(frame.image, cv2.COLOR_BGR2GRAY)
                 sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
             focused = sharpness >= self.config.input.min_sharpness
             self.metrics.focus(sharpness, focused)
-            annotated = None
+            event.snapshot_note = ("仅保存事件，截图尚未写入" if focused else
+                                   f"blurred frame: Laplacian={sharpness:.1f}, "
+                                   f"threshold={self.config.input.min_sharpness:.1f}")
+            try:
+                self.storage.save(event, None)
+            except Exception:
+                self.storage_failed += 1
+                self.metrics.snapshot_skipped += 1
+                LOG.exception("Event persistence failed for %s", event.event_id)
+                continue
+            self.events_persisted += 1
+            if self.delivery:
+                self.delivery.wake.set()
             if focused:
                 annotated = frame.image.copy()
                 x1, y1, x2, y2 = map(int, event.bbox)
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                if not self._output.submit(event, annotated):
+                    self.output_queue_dropped += 1
+                    self.metrics.snapshot_skipped += 1
             else:
-                event.snapshot_note = (
-                    f"blurred frame: Laplacian={sharpness:.1f}, "
-                    f"threshold={self.config.input.min_sharpness:.1f}")
-            if not self._output.submit(event, annotated):
-                self.output_queue_dropped += 1
-                event.snapshot_note = "事件输出队列已满，未保存截图"
-            self.metrics.events += 1
+                self.metrics.snapshot_skipped += 1
+                self.metrics.event_output.add((time.monotonic() - queued_at) * 1000)
             self.metrics.event_end_to_end.add(
                 (time.monotonic() - frame.captured_at) * 1000)
 
@@ -228,16 +233,24 @@ class Pipeline:
                                  "snapshot_skipped": self.metrics.snapshot_skipped,
                                  "fps": self.metrics.processed_frames / max(.001,
                                                                             time.monotonic() - self.metrics.started)})
-        if self._writer:
-            self._writer.writerow({"seq": frame.seq,
-                                   "source_time": frame.source_time,
-                                   "inference_ms": inference,
-                                   "software_frame_age_ms": elapsed,
-                                   "detections": len(detections),
-                                   "events": len(events),
-                                   "rss_bytes": self.metrics.process.memory_info().rss,
-                                   "queue_dropped": self.queue.dropped_count})
-            self._trace.flush()
+        if self._trace:
+            try:
+                self._trace.writerow({"seq": frame.seq,
+                                       "source_time": frame.source_time,
+                                       "inference_ms": inference,
+                                       "software_frame_age_ms": elapsed,
+                                       "detections": len(detections),
+                                       "events": len(events),
+                                       "rss_bytes": self.metrics.process.memory_info().rss,
+                                       "queue_dropped": self.queue.dropped_count})
+            except (OSError, ValueError):
+                self.trace_failed = True
+                LOG.exception("Disabling diagnostic trace after a write failure")
+                try:
+                    self._trace.close()
+                except OSError:
+                    LOG.exception("Could not flush diagnostic trace")
+                self._trace = None
 
     def run(
             self,
@@ -282,7 +295,9 @@ class Pipeline:
             # 单帧异常只记录并继续，避免一张坏帧结束整段回放或实时服务。
             try:
                 self._process(frame)
+                self.frame_health.observe(captured_at=frame.captured_at)
             except Exception:
+                self.frame_health.observe("frame_processing")
                 self.metrics.errors += 1
                 LOG.exception("Frame %s processing failed", frame.seq)
 
@@ -303,14 +318,14 @@ class Pipeline:
         thread = None
         try:
             if trace_path:
-                p = Path(trace_path)
-                p.parent.mkdir(parents=True, exist_ok=True)
-                self._trace = p.open("w", newline="", encoding="utf8")
-                self._writer = csv.DictWriter(self._trace, fieldnames=[
-                    "seq", "source_time", "inference_ms", "software_frame_age_ms",
-                    "detections", "events", "rss_bytes", "queue_dropped"])
-                self._writer.writeheader()
+                try:
+                    self._trace = FrameTrace(trace_path, self.storage.root)
+                except OSError:
+                    self.trace_failed = True
+                    LOG.exception("Could not open diagnostic trace")
             self.mqtt.connect()
+            if self.config.mqtt.enabled:
+                self.delivery = DeliveryWorker(self.storage, self.mqtt, self.frame_health)
             self._output = _EventOutputWorker(self)
             if mode == "sync":
                 # 基线模式不创建队列，便于比较没有丢帧时的处理吞吐。
@@ -345,6 +360,9 @@ class Pipeline:
                 if self._output is not None:
                     self._output.close()
             finally:
+                if self.delivery:
+                    self.delivery.close()
+                self.mqtt.publish_health({**self.frame_health.status(), "state": "stopped"})
                 self.mqtt.close()
                 if self._trace:
                     self._trace.close()
@@ -354,6 +372,11 @@ class Pipeline:
         result = self.metrics.summary()
         # 在基础指标上补充队列、重连、存储和 MQTT 结果，方便一次运行的 JSON 直接验收。
         mqtt_status = self.mqtt.status()
+        try:
+            backlog = len(self.storage.pending_events()) if self.config.mqtt.enabled else 0
+        except (OSError, ValueError, RuntimeError):
+            backlog = None
+            LOG.exception("Could not read MQTT backlog from event storage")
         result.update({"mode": mode,
                        "input_rotation": self.config.input.rotation,
                        "input_mirror_horizontal": self.config.input.mirror_horizontal,
@@ -371,9 +394,14 @@ class Pipeline:
                                                                0),
                        "camera_ipc_skipped_frames": getattr(self.source, "driver_dropped_frames", 0),
                        "storage_failed": self.storage_failed,
+                       "trace_failed": self.trace_failed,
                        "output_queue_dropped": self.output_queue_dropped,
-                       "mqtt_published": self.mqtt_published,
-                       "mqtt_failed": self.mqtt_failed,
+                       "events_persisted": self.events_persisted,
+                       "events_dropped": self.storage_failed,
+                       "frame_health": self.frame_health.status(),
+                       "mqtt_outbox_pending": backlog,
+                       "mqtt_published": mqtt_status["accepted"],
+                       "mqtt_failed": mqtt_status["failed"],
                        "mqtt_acknowledged": mqtt_status["acknowledged"],
                        "mqtt_pending": mqtt_status["pending"]})
         return result

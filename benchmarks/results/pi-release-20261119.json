@@ -1,0 +1,81 @@
+{
+  "version": "0.2.0",
+  "date": "2026-11-19",
+  "board": "Raspberry Pi 5 Model B Rev 1.0",
+  "comparison": "Separate 60 s real camera runs on different days, latest mode, 640x480 requested at 20 FPS, no MQTT or preview. Scene contents not controlled.",
+  "before": {
+    "duration_seconds": 60.030708768000295,
+    "capture_frames": 1155,
+    "processed_frames": 1149,
+    "inference_fps": 19.140203798701123,
+    "inference_p95_ms": 37,
+    "end_to_end_p95_ms": 42,
+    "queue_dropped_frames": 6,
+    "camera_ipc_skipped_frames": 0,
+    "errors": 0,
+    "events": 1,
+    "snapshot_saved": 0,
+    "snapshot_skipped": 1,
+    "storage_failed": 0,
+    "camera_reconnects": 0,
+    "peak_rss_bytes": 105545728,
+    "throttled": "0x0",
+    "model": "yolox_nano_320.onnx",
+    "model_sha256": "1743ea864cb8321abab1e5d4e8c1a1d26dff881af3759d4803b1a0791b7a9da2",
+    "ort_threads": 2,
+    "roi_enabled": false,
+    "preview_enabled": false
+  },
+  "after": {
+    "duration_seconds": 60.03560342399999,
+    "capture_frames": 1155,
+    "processed_frames": 1152,
+    "inference_fps": 19.188613660864338,
+    "inference_p95_ms": 35,
+    "end_to_end_p95_ms": 41,
+    "queue_dropped_frames": 3,
+    "camera_ipc_skipped_frames": 0,
+    "errors": 0,
+    "events": 10,
+    "events_persisted": 10,
+    "events_dropped": 0,
+    "snapshot_saved": 5,
+    "snapshot_skipped": 5,
+    "storage_failed": 0,
+    "camera_reconnects": 0,
+    "peak_rss_bytes": 106692608,
+    "throttled": "0x0",
+    "model": "yolox_nano_320.onnx",
+    "model_sha256": "1743ea864cb8321abab1e5d4e8c1a1d26dff881af3759d4803b1a0791b7a9da2",
+    "ort_threads": 2,
+    "roi_enabled": false,
+    "preview_enabled": false
+  },
+  "isolated_broker_test": {
+    "generated": 2,
+    "stored": 2,
+    "puback": 2,
+    "subscriber_unique": 2,
+    "dropped": 0
+  },
+  "camera_path_recovery": {
+    "test": "Device path unavailable at startup, then restored to a real UVC camera",
+    "seconds_to_three_processed_frames": 3.33
+  },
+  "service_sample": {
+    "seconds": 10.004,
+    "frames": 200,
+    "interval_fps": 19.99,
+    "mqtt": {
+      "state": "connected",
+      "accepted": 8,
+      "acknowledged": 8,
+      "pending": 0
+    },
+    "roi_enabled": false
+  },
+  "board_tests": [
+    "SKIPPED [1] tests/test_dashboard.py:11: Node.js unavailable for browser helper execution",
+    "196 passed, 1 skipped in 6.72s"
+  ]
+}

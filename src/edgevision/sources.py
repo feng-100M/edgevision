@@ -170,6 +170,7 @@ class UvcCameraSource:
         self.start_time = None
         self._process = None
         self.driver_dropped_frames = 0
+        self.on_read_failure = None
 
     def __iter__(self):
         # 每轮创建新的子进程和进程队列；一轮超时或退出后，下一轮负责重连。
@@ -226,6 +227,8 @@ class UvcCameraSource:
                 # 只有不是主动停止才算一次重连；主动 close 不应增加故障计数。
                 if not self.stop.is_set():
                     self.reconnects += 1
+                    if self.on_read_failure:
+                        self.on_read_failure("camera_read")
                     LOG.warning(
                         "Camera %s unavailable; retry %d",
                         self.device,

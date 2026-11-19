@@ -159,3 +159,21 @@ def test_dashboard_page_and_script_are_served_as_packaged_resources():
         assert 'Asia/Shanghai' in script
     finally:
         preview.close()
+def test_live_status_tracks_delayed_snapshot_after_last_frame(tmp_path):
+    import json
+    import time
+    import urllib.request
+    import numpy as np
+    from edgevision.preview import PreviewServer
+    from edgevision.types import Frame
+    from test_storage import event
+    preview = PreviewServer(port=0)
+    try:
+        record = event("delayed")
+        frame = Frame(0, time.monotonic(), np.zeros((20, 20, 3), np.uint8), "test")
+        preview.update(frame, [], [], [record], [(0,0),(10,0),(10,10)], {})
+        record.snapshot_path = "2026-11-18/delayed.jpg"
+        with urllib.request.urlopen(preview.url + "/status", timeout=2) as response:
+            assert json.load(response)["recent_events"][0]["snapshot_path"] == record.snapshot_path
+    finally:
+        preview.close()

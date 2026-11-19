@@ -53,6 +53,7 @@ class MqttPublisher:
         self.client.reconnect_delay_set(min_delay=1, max_delay=15)
         self.client.max_queued_messages_set(16)
         self.client.max_inflight_messages_set(4)
+        self.client.will_set(self.topic + "/health", json.dumps({"state": "offline"}), qos=1, retain=True)
         self.client.enable_logger(LOG)
         self.client.on_publish = self._on_publish
 
@@ -156,6 +157,15 @@ class MqttPublisher:
                 self._last_error = error
                 self._remember(event_id, "failed", error)
             return PublishResult(False, error)
+
+    def publish_health(self, status):
+        """Retained heartbeat on a sibling topic, outside alarm PUBACK accounting."""
+        if self.enabled and self.client.is_connected():
+            with self._publish_lock:
+                try:
+                    self.client.publish(self.topic + "/health", json.dumps(status), qos=0, retain=True)
+                except (OSError, RuntimeError, ValueError):
+                    LOG.exception("Could not publish frame health")
 
     def close(self):
         """停止网络线程并关闭连接。"""

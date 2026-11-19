@@ -29,10 +29,11 @@ SCRIPT = files("edgevision").joinpath("dashboard.js").read_text(encoding="utf-8"
 class PreviewServer:
     """提供状态 JSON、单帧 JPEG 和 MJPEG 流的本地预览服务。"""
 
-    def __init__(self, port=8765, on_stop=None, event_store=None, mqtt_status=None):
+    def __init__(self, port=8765, on_stop=None, event_store=None, mqtt_status=None, frame_health=None):
         self.on_stop = on_stop
         self.event_store = event_store
         self.mqtt_status = mqtt_status
+        self.frame_health = frame_health
         self._lock = threading.Condition()
         self._jpeg = None
         self._status = {}
@@ -74,9 +75,12 @@ class PreviewServer:
                 elif path == "/status":
                     with owner._lock:
                         status = {**owner._status,
+                                  "recent_events": [e.to_dict() for e in owner._events],
                                   "preview_frames": owner._rendered,
                                   "preview_fps": owner._rendered / max(.001,
                                                                        time.monotonic() - owner._render_started) if owner._render_started else 0.}
+                    if owner.frame_health:
+                        status["frame_health"] = owner.frame_health()
                     status["server_time"] = datetime.now(timezone.utc).isoformat()
                     status["display_timezone"] = "Asia/Shanghai"
                     status["mqtt"] = owner.mqtt_status() if owner.mqtt_status else {"state": "unavailable"}
@@ -176,11 +180,11 @@ class PreviewServer:
         with self._lock:
             # 状态和事件立即可读；待绘制帧只保留一份，保证渲染线程不会追赶历史积压。
             for event in events:
-                self._events.append(event.to_dict())
+                self._events.append(event)
             self._status = {"seq": frame.seq, "detections": len(detections),
                             "frame_width": frame.image.shape[1],
                             "frame_height": frame.image.shape[0],
-                            **metrics, "recent_events": list(self._events)}
+                            **metrics}
             if not self._closed:
                 self._pending = (frame, list(tracks), list(polygon))
                 self._lock.notify_all()

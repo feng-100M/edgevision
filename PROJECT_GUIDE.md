@@ -72,8 +72,9 @@ flowchart LR
     E --> F[person 检测]
     F --> G[轻量跟踪]
     G --> H[ROI 与事件规则]
-    H --> I[JPEG + JSONL]
-    H --> J[本机 Mosquitto MQTT]
+    H --> I[事件 JSONL 与待发状态]
+    I --> M[异步截图]
+    I --> J[QoS 1 补发与确认]
     D --> K[本机 MJPEG 预览]
     E --> L[FPS/延迟/温度指标]
 ```
@@ -123,9 +124,9 @@ flowchart LR
 
 ### 5.5 事件存储与 MQTT
 
-[storage.py](src/edgevision/storage.py) 同时保存 JPEG 和 JSONL。事件输出使用有界后台线程，检测线程只提交任务；清晰度门槛不通过时仍保存事件元数据，但 `snapshot_path` 为空并记录原因。写入顺序、原子替换和回滚逻辑保证不会出现“JSON 已记录但截图不存在”的半成品事件。
+检测线程先持久化事件 ID、元数据及启用 MQTT 时的待发状态。截图在线程中异步编码，写入成功后按 ID 更新 `snapshot_path`。截图队列拥塞、画面模糊或截图超出配额时，元数据仍可查。清理会先核算可回收容量，并保护所有待确认记录。
 
-[mqtt_client.py](src/edgevision/mqtt_client.py) 使用本机 Mosquitto 和 QoS 1。发布器有有限的排队和 inflight 数量，MQTT 暂时不可用时不阻塞本地检测。`mqtt_published`/“已接收”表示 Paho 接受了发布请求；只有 `mqtt_acknowledged`/“Broker 已确认”表示收到了 QoS 1 PUBACK，仍不代表订阅端业务已经处理完成。断线瞬间被 Paho 排队的消息会继续显示为待确认，直到重新连接后收到 PUBACK。
+[mqtt_client.py](src/edgevision/mqtt_client.py) 使用本机 Mosquitto 和 QoS 1。发布器有有限的排队和 inflight 数量，MQTT 暂时不可用时不阻塞本地检测。`mqtt_published`/“已接收”表示 Paho 接受了发布请求；只有 `mqtt_acknowledged`/“Broker 已确认”表示收到了 QoS 1 PUBACK，仍不代表订阅端业务已经处理完成。待发状态保存在事件 JSONL 中。重连和进程重启都会重新扫描待发记录，值班端使用 `edgevision receive` 按事件 ID 去重、保存收件凭据。详见[运行指南](docs/runtime.md)。
 
 ### 5.6 流水线与命令行
 
@@ -170,7 +171,7 @@ sh scripts/run.sh
 
 固定 20 帧对照中，416 输入模型 ORT 中位耗时约 60.70 ms，352 约 41.28 ms，320 约 34.02 ms。320 模型与原模型的输出框 IoU≥0.5 匹配比例为 83.82%。这个比例只能说明输出变化，不能当成人工标注集上的准确率、召回率或 mAP。
 
-上一版的本地自动化结果为 169 项通过、2 项跳过，树莓派同步后为 170 项通过、1 项跳过。已完成模型校验、视频回放、MQTT 往返、摄像头短时运行、方向和镜像校正、本机 GUI 启动以及预览停止验证。2～8 小时稳定性、真实 USB 物理拔插恢复和独立标注数据评测仍未完成。
+上一版的本地自动化结果为 169 项通过、2 项跳过，树莓派同步后为 170 项通过、1 项跳过。已完成模型校验、视频回放、MQTT 往返、摄像头短时运行、方向和镜像校正、本机 GUI 启动以及预览停止验证。2～8 小时稳定性、真实 USB 物理拔插恢复和目标机位人工标注评测仍待验证。公开短片的独立标注评测见[性能实验](benchmarks/README.md)。
 
 ## 7. 后续验证与改进方向
 

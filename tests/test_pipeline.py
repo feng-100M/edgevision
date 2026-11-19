@@ -209,3 +209,141 @@ def test_latest_measures_residence_and_ipc_skips_separately(tmp_path):
     assert summary["camera_ipc_skipped_frames"] == summary["camera_driver_dropped_frames"] == 7
     assert summary["app_queue_wait_p95_ms"] >= 0
     assert summary["max_queue_size"] == 1
+def test_evaluation_separates_recordings_and_reports_exposure():
+    from edgevision.evaluation import evaluate_events
+    row = {"event_type": "person_entered", "roi_name": "door", "source_time": 1.0}
+    scored = evaluate_events([dict(row, source_name="A")], [dict(row, source_name="B")])
+    assert (scored["tp"], scored["fp"], scored["fn"]) == (0, 1, 1)
+    scored = evaluate_events([dict(row, source_name="A")], [dict(row, source_name="B")],
+                             clip_seconds={"A": 3, "B": 5, "empty": 4})
+    assert scored["effective_seconds"] == 12
+    assert scored["by_event_type"]["person_entered"] == {"truth": 1, "tp": 0, "fp": 1, "fn": 1}
+    assert scored["by_event_type"]["person_left"]["truth"] == 0
+
+def test_snapshot_queue_cannot_drop_event_ids(tmp_path, monkeypatch):
+    from edgevision.pipeline import Pipeline, _EventOutputWorker
+    cfg = config(tmp_path)
+    cfg.input.min_sharpness = 0
+    monkeypatch.setattr(_EventOutputWorker, "submit", lambda *args: False)
+    pipeline = Pipeline(cfg, Frames(), Boxes())
+    summary = pipeline.run(mode="sync")
+    assert len(pipeline.storage.recent_events()) == summary["events"] == 2
+    assert summary["events_persisted"] == 2
+    assert summary["events_dropped"] == 0
+    assert summary["snapshot_skipped"] == 2
+
+def test_frame_health_reports_processing_failure_and_recovery(tmp_path):
+    from edgevision.pipeline import Pipeline
+    pipeline = Pipeline(config(tmp_path), Frames(), Boxes(True))
+    seen = []
+    class Observe(Frames):
+        def __iter__(self):
+            for frame in super().__iter__():
+                seen.append(pipeline.frame_health.status())
+                yield frame
+    pipeline.source = Observe()
+    result = pipeline.run(mode="sync")
+    assert seen[1]["state"] == "unavailable"
+    assert seen[1]["consecutive_failures"] == 1
+    assert seen[2]["state"] == "recovered"
+    assert result["frame_health"]["last_success_at"]
+    assert result["frame_health"]["consecutive_failures"] == 0
+
+def test_trace_rotates_outside_evidence_directory(tmp_path):
+    from edgevision.pipeline import Pipeline
+    from edgevision import trace
+    import pytest
+    path = tmp_path / "diag" / "frames.csv"
+    cfg = config(tmp_path / "events")
+    with pytest.raises(ValueError, match="event"):
+        Pipeline(cfg, Frames(), Boxes()).run(mode="sync", trace_path=cfg.output.directory / "trace.csv")
+    original = trace.FrameTrace.MAX_BYTES
+    try:
+        trace.FrameTrace.MAX_BYTES = 145
+        Pipeline(cfg, Frames(), Boxes()).run(mode="sync", trace_path=path)
+    finally:
+        trace.FrameTrace.MAX_BYTES = original
+    files = list(path.parent.glob("frames.csv*"))
+    assert len(files) == 2
+    assert all(f.stat().st_size <= 145 and f.read_text().startswith("seq,source_time,") for f in files)
+
+def test_camera_health_available_between_frames(tmp_path):
+    from edgevision.pipeline import Pipeline
+    from edgevision.preview import PreviewServer
+    from urllib.request import urlopen
+    class Disconnect(Frames):
+        on_read_failure = None
+        def __iter__(self):
+            for frame in super().__iter__():
+                if frame.seq == 1:
+                    self.on_read_failure("camera_read")
+                    self.on_read_failure("camera_read")
+                    with urlopen(preview.url + "/status", timeout=2) as response:
+                        failed = json.load(response)["frame_health"]
+                    assert failed["state"] == "unavailable"
+                    assert failed["consecutive_failures"] == 2
+                    assert failed["last_success_at"]
+                yield frame
+    pipeline = Pipeline(config(tmp_path), Disconnect(), Boxes())
+    preview = PreviewServer(port=0, frame_health=pipeline.frame_health.status)
+    try:
+        summary = pipeline.run(mode="sync")
+        assert summary["frame_health"]["last_recovery_at"]
+    finally:
+        preview.close()
+
+def test_slow_old_frame_cannot_clear_newer_camera_failure(tmp_path):
+    from edgevision.pipeline import Pipeline
+    class LateFrame(Frames):
+        on_read_failure = None
+        def __iter__(self):
+            for frame in super().__iter__():
+                frame.captured_at -= 1  # Previously captured frame still in the detector.
+                self.on_read_failure("camera_read")
+                yield frame
+                break
+    result = Pipeline(config(tmp_path), LateFrame(), Boxes()).run(mode="sync")
+    assert result["frame_health"]["state"] == "unavailable"
+    assert result["frame_health"]["consecutive_failures"] == 1
+
+def test_stalled_screenshot_worker_preserves_all_events(tmp_path, monkeypatch):
+    import threading
+    from edgevision.pipeline import Pipeline
+    release = threading.Event()
+
+    class BurstSource(Frames):
+        def __iter__(self):
+            yield Frame(0, time.monotonic(), np.zeros((100, 100, 3), np.uint8), "burst", 0.)
+            release.set()
+
+    class BurstDetector:
+        last_inference_ms = 1.
+        def detect(self, image):
+            return [Detection(i, 10, i + 4, 50, .9) for i in range(40)]
+
+    cfg = config(tmp_path)
+    cfg.input.min_sharpness = 0
+    cfg.roi.enabled = False
+    pipeline = Pipeline(cfg, BurstSource(), BurstDetector())
+    original = pipeline.storage.attach_snapshot
+    def slow_snapshot(event, image):
+        assert release.wait(5)
+        return original(event, image)
+    monkeypatch.setattr(pipeline.storage, "attach_snapshot", slow_snapshot)
+    summary = pipeline.run(mode="sync")
+    assert summary["output_queue_dropped"] >= 7
+    assert summary["events_dropped"] == 0
+    assert summary["events_persisted"] == len(pipeline.storage.recent_events()) == 40
+    assert summary["snapshot_saved"] + summary["snapshot_skipped"] == 40
+
+def test_diagnostic_disk_error_does_not_signal_camera_outage(tmp_path, monkeypatch):
+    from edgevision.pipeline import Pipeline
+    from edgevision.trace import FrameTrace
+    def fail(self, row):
+        raise OSError("diagnostic volume full")
+    monkeypatch.setattr(FrameTrace, "writerow", fail)
+    summary = Pipeline(config(tmp_path / "events"), Frames(), Boxes()).run(
+        mode="sync", trace_path=tmp_path / "diag" / "frames.csv")
+    assert summary["errors"] == 0
+    assert summary["events_persisted"] == 2
+    assert summary["frame_health"]["state"] == "healthy"

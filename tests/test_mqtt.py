@@ -195,3 +195,14 @@ def test_publish_does_not_hold_status_lock_while_paho_invokes_callback(monkeypat
         assert publisher.status()["acknowledged"] == 1
     finally:
         publisher.close()
+def test_receiver_deduplicates_across_restart(tmp_path):
+    import json
+    import sqlite3
+    from edgevision.receiver import record_receipt
+    path = tmp_path / "subscriber.db"
+    payload = json.dumps({"event_id": "one"}).encode()
+    with sqlite3.connect(path) as first:
+        assert record_receipt(first, payload)
+    with sqlite3.connect(path) as second:
+        assert not record_receipt(second, payload)
+        assert second.execute("SELECT event_id FROM receipts").fetchall() == [("one",)]

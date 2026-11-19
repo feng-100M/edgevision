@@ -102,3 +102,16 @@ def test_runtime_rejects_unregistered_weights_before_loading_detector(tmp_path,m
     args=[command,"--config",str(config_path)]
     if command=="infer":args.extend(["--image","input.png","--model","models/unregistered.onnx"])
     assert cli.main(args)==2
+def test_evaluate_cli_includes_clips_with_no_events(tmp_path, capsys):
+    import json
+    from edgevision.cli import main
+    annotations = tmp_path / "labels.json"
+    predictions = tmp_path / "events.jsonl"
+    row = {"event_type": "person_left", "source_time": 1.0, "roi_name": "door"}
+    annotations.write_text(json.dumps({"clip_seconds": {"A": 3, "B": 7, "empty": 5},
+                                       "events": [dict(row, source_name="A")]}))
+    predictions.write_text(json.dumps(dict(row, source_name="B")) + "\n")
+    assert main(["evaluate", "--annotations", str(annotations), "--predicted", str(predictions)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["effective_seconds"] == 15
+    assert report["by_event_type"]["person_left"] == {"truth": 1, "tp": 0, "fp": 1, "fn": 1}

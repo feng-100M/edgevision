@@ -188,3 +188,73 @@ def test_history_and_thumbnails_reuse_index_until_log_changes(tmp_path, monkeypa
     assert len(store.recent_events()) == 2
     store.snapshot('second')
     assert len(calls) == 1
+def test_impossible_quota_preserves_evidence_and_foreign_log(tmp_path):
+    from edgevision.storage import EventStorage, StorageError
+    store = EventStorage(tmp_path, max_bytes=4096, min_free_bytes=0)
+    store.save(event("old"), np.zeros((20, 20, 3), np.uint8))
+    before = store.snapshot("old")
+    (tmp_path / "unmanaged.bin").write_bytes(b"x" * 4100)
+    with pytest.raises(StorageError):
+        store.save(event("new"), None)
+    assert [row["event_id"] for row in store.recent_events()] == ["old"]
+    assert store.snapshot("old") == before
+    assert store.cleaned_events == 0
+
+def test_unconfirmed_events_are_protected_until_durable_ack(tmp_path):
+    from edgevision.storage import EventStorage, StorageError
+    store = EventStorage(tmp_path, max_bytes=650, min_free_bytes=0)
+    store.queue_delivery = True
+    store.save(event("old"), None)
+    with pytest.raises(StorageError):
+        store.save(event("new"), None)
+    assert [row["event_id"] for row in store.pending_events()] == ["old"]
+    store.acknowledge({"old"})
+    reopened = EventStorage(tmp_path, max_bytes=650, min_free_bytes=0)
+    assert not reopened.pending_events()
+    reopened.save(event("new"), None)
+    assert reopened.recent_events()[0]["event_id"] == "new"
+
+def test_full_diagnostics_directory_does_not_consume_event_quota(tmp_path):
+    from edgevision.storage import EventStorage
+    store = EventStorage(tmp_path / "events", max_bytes=4096, min_free_bytes=0)
+    store.save(event("old"), None)
+    diagnostics = tmp_path / "diagnostics"
+    diagnostics.mkdir()
+    (diagnostics / "frames.csv").write_bytes(b"x" * 4100)
+    store.save(event("new"), None)
+    assert {row["event_id"] for row in store.recent_events()} == {"old", "new"}
+
+def test_async_snapshot_preserves_ack_and_updates_history(tmp_path):
+    from edgevision.storage import EventStorage
+    store = EventStorage(tmp_path, min_free_bytes=0)
+    store.queue_delivery = True
+    record = event("photo")
+    store.save(record, None)
+    store.acknowledge({"photo"})
+    assert store.attach_snapshot(record, np.zeros((20, 20, 3), np.uint8))
+    assert store.snapshot("photo").startswith(b"\xff\xd8")
+    assert store.recent_events()[0]["delivery_state"] == "acked"
+
+def test_legacy_service_trace_does_not_disable_upgraded_service(tmp_path):
+    from edgevision.storage import EventStorage
+    store = EventStorage(tmp_path, max_bytes=4096, min_free_bytes=0)
+    store.save(event("old"), np.zeros((20, 20, 3), np.uint8))
+    legacy = tmp_path / "service-frames.csv"
+    legacy.write_bytes(b"x" * 4100)
+    store.save(event("new"), np.zeros((20, 20, 3), np.uint8))
+    assert {row["event_id"] for row in store.recent_events()} == {"old", "new"}
+    assert legacy.stat().st_size == 4100
+
+def test_failed_replacement_event_write_keeps_old_evidence(tmp_path, monkeypatch):
+    from edgevision.storage import EventStorage, StorageError
+    store = EventStorage(tmp_path, max_bytes=1500, min_free_bytes=0)
+    store.save(event("old"), np.zeros((20, 20, 3), np.uint8))
+    rewrite = store._rewrite
+    def fail_new(log, rows):
+        if any(row["event_id"] == "new" for row in rows):
+            raise OSError("disk unavailable")
+        rewrite(log, rows)
+    monkeypatch.setattr(store, "_rewrite", fail_new)
+    with pytest.raises(StorageError):
+        store.save(event("new"), np.zeros((20, 20, 3), np.uint8))
+    assert store.snapshot("old")

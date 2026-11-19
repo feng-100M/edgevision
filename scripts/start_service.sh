@@ -17,5 +17,4 @@ exec systemd-run --user --unit=edgevision-reproduction --collect \
     --working-directory="$PROJECT_DIR" \
     "$PROJECT_DIR/.venv/bin/edgevision" run \
     --config "$PROJECT_DIR/config.local.yaml" --input uvc \
-    --json-out benchmarks/results/service-last-run.json \
-    --trace output/service-frames.csv "$@"
+    --json-out benchmarks/results/service-last-run.json "$@"
