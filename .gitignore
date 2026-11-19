@@ -36,6 +36,7 @@ Thumbs.db
 *.jpeg
 *.jpg
 *.png
+!/docs/demo/track-22-walkthrough.png
 *.jsonl
 *.log
 *.part
