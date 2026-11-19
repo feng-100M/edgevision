@@ -33,6 +33,7 @@ Thumbs.db
 *.pth
 *.avi
 *.mp4
+!/docs/demo/track-22-explained.mp4
 *.jpeg
 *.jpg
 *.png

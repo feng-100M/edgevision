@@ -6,20 +6,15 @@ EdgeVision 在 Raspberry Pi 5 上使用 USB 摄像头检测人员进出指定区
 
 ## 检测演示
 
-![轨迹 22 在 13.08 秒和 13.40 秒的原始录像局部，右侧为同一帧的实际统计](docs/demo/track-22-walkthrough.png)
+[![视频预览：轨迹 22 的原速回放、慢放和同步事件计数](docs/demo/detection-replay.gif)](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
 
-**只跟踪 #22。** 上图中框底的圆点在蓝线右边，右侧显示「当前人数 1、区域内 1」。这是 #22 第一次被识别，系统随即记下第 5 条事件「进入」。下图仍是同一人，圆点刚到蓝线左边，因此「当前人数」还是 1，「区域内」降到 0；新增一条「离开」，累计事件变成 6。两帧相隔 0.32 秒。
+[播放或下载 MP4（21 秒，中文字幕）](https://raw.githubusercontent.com/feng-100M/edgevision/main/docs/demo/track-22-explained.mp4)
 
-这也暴露了当前规则的局限：13.08 秒的人体检测分数为 0.387，高于示例阈值 0.35，轨迹首次出现时已在区域内就可以产生事件。该帧缺少 #22 从区外走到区内的观测。按本片的人工框标注与 ±1 秒窗口评测，这次「进入」是误报，13.40 秒的「离开」则匹配到 13.36 秒的标注。[阈值对照实验](benchmarks/README.md#walk1-检测阈值对照)
+先看原速，再跟随慢放观察 **#22 框底的圆点**。原片 13.08 秒时，#22 首次出现就在蓝区内，系统记「进入」，累计事件从 4 变成 5。13.40 秒时仍检测到同一人，圆点刚到区外，区域内人数从 1 变成 0，累计事件变成 6。右侧数字取自左侧画面的同一帧。
 
-<details>
-<summary>查看完整检测界面动图</summary>
+13.08 秒的 0.39 是人体检测分数。按人工框衍生的标注和 ±1 秒匹配窗口，这条「进入」是误报。片尾对照 0.35 与 0.80 两档人体检测门槛，两次都从头运行相同的 611 帧。[完整阈值对照](benchmarks/README.md#walk1-检测阈值对照)
 
-![公开录像实际回放，显示人员框、区域内人数、最新事件截图与历史进出统计](docs/demo/detection-replay.gif)
-
-</details>
-
-动图录自本机浏览器，使用 YOLOX-Nano 回放 CAVIAR 的 `Walk1`，关闭 MQTT。分解图按同一次序逐帧回放，用实际轨迹、判定点及计数标注录像局部。原始素材由 EC Funded CAVIAR project/IST 2001 37540 提供，两份演示图沿用 CC BY-SA 许可。[CAVIAR 数据与许可](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA1/)
+演示基于 CAVIAR 的 `Walk1` 录像和项目的真实逐帧推理结果，加入检测叠加、慢放与定格字幕。原始素材由 EC Funded CAVIAR project/IST 2001 37540 提供，视频与动图预览沿用 CC BY-SA 许可。[CAVIAR 数据与许可](https://homepages.inf.ed.ac.uk/rbf/CAVIARDATA1/)
 
 完成下方安装和素材下载后，在仓库根目录执行，即可用项目自带的 OpenCV 样例做相同操作。打开终端打印的预览地址；演示结束时点击 **停止检测**。
 
